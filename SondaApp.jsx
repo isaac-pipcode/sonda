@@ -1,28 +1,18 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useCallback } from "react";
+import { SondaAPI } from "./sonda_api_client";
 
 /*
-  SONDA — Protótipo unificado (esqueleto do produto)
+  SONDA — Protótipo unificado (apontado à API real)
   ==================================================
-  Reúne as quatro visões construídas ao longo do projeto numa interface única,
-  vestida com a identidade Espectro 1.0 (Observatório de Dados e Políticas do
-  Audiovisual — UFF).
+  Reúne as quatro visões na identidade Espectro 1.0 (Observatório de Dados e
+  Políticas do Audiovisual — UFF), agora consumindo o backend FastAPI:
 
-  Identidade aplicada:
-   - Carbono (#0E1116) ancora o fundo;
-   - Sinal (#FF3D2E) é interferência: o achado, a aresta factual, a incompletude;
-   - Sonar (#00C2A8) é leitura: o derivado, a articulação;
-   - Osso/Pergaminho são superfícies claras; Sedimento é estrutura/repouso;
-   - tipografia pesada e geométrica no wordmark, mono para proveniência.
-   - o isótipo (linhas paralelas, uma interferida por um nó, leitura vertical
-     tracejada) aparece como marca e como motivo estrutural.
+   1. CATÁLOGO    — bases agregadas, na língua própria (porosidade ontológica)
+   2. PERCURSO    — rede de caminhos + Sonda generativa (elo ausente → contrato)
+   3. TRAJETÓRIA  — cruzamento como série temporal (estoque → fluxo)
+   4. CRUZAMENTOS — objetos persistentes: autoria, versão, execução, bifurcação
 
-  Quatro visões:
-   1. CATÁLOGO    — as bases agregadas, em suas línguas próprias (porosidade ontológica)
-   2. PERCURSO    — a rede de caminhos navegável + Sonda generativa (elo ausente → contrato)
-   3. TRAJETÓRIA  — o cruzamento como série temporal (estoque → fluxo)
-   4. CRUZAMENTOS — objetos persistentes: autoria, versão, bifurcação
-
-  Dados: fac-símiles de estrutura, fiéis ao que a sondagem revelou.
+  Toda resposta da API traz `proveniencia`; nenhuma visão a descarta (porosidade 2).
 */
 
 const S = {
@@ -33,14 +23,9 @@ const S = {
   sedimento: "#6B6A66", sedimentoSoft: "#9B9A94",
 };
 
-const BASES = {
-  OCA:  { label: "OCA", desc: "Ancine · regulação", cor: S.sinal,
-          regime: "aberto · CSV não-proprietário", entidade: "obra (CPB), agente regulado, sala" },
-  LPG:  { label: "LPG", desc: "MinC · fomento", cor: S.sonar,
-          regime: "disperso · PDF / planilha / diário oficial", entidade: "edital local, projeto contemplado" },
-  MAPA: { label: "Mapa Cultural", desc: "MinC · colaborativo", cor: S.sedimentoSoft,
-          regime: "API REST · JSON federado", entidade: "agente, espaço, evento, projeto" },
-};
+// cor por base (estrutura neutra até a base se declarar)
+const COR_BASE = { oca: S.sinal, lpg: S.sonar, mapa_cultural: S.sedimentoSoft };
+const corDaBase = (b) => COR_BASE[b] || S.sedimentoSoft;
 
 // ——— isótipo SVG inline (a marca como componente) ———
 function Isotipo({ size = 40, ativo = true }) {
@@ -50,9 +35,7 @@ function Isotipo({ size = 40, ativo = true }) {
       {linhas.map((y, i) => {
         const curva = i === 2 || i === 3 || i === 4;
         const sinal = i === 3;
-        const d = curva
-          ? `M 8 ${y} Q 50 ${y - 12} 92 ${y}`
-          : `M 8 ${y} L 92 ${y}`;
+        const d = curva ? `M 8 ${y} Q 50 ${y - 12} 92 ${y}` : `M 8 ${y} L 92 ${y}`;
         return <path key={i} d={d} fill="none"
           stroke={sinal && ativo ? S.sinal : S.sedimento}
           strokeWidth={sinal ? 3.4 : 2.2} strokeLinecap="round"
@@ -81,32 +64,85 @@ function Wordmark() {
   );
 }
 
+// ——— estados de carga/erro (a costura também aparece aqui) ———
+function Estado({ carregando, erro, vazio, children }) {
+  if (carregando) return <Mono cor={S.sedimentoSoft}>↳ sondando a API…</Mono>;
+  if (erro) return <Mono cor={S.sinal}>⚠ {erro} — a API está no ar? (VITE_SONDA_API)</Mono>;
+  if (vazio) return <Mono cor={S.sedimentoSoft}>catálogo vazio — rode o seed.py / coleta_real_mapas.py</Mono>;
+  return children;
+}
+
+// hook mínimo de fetch que PRESERVA o envelope (dados + proveniencia)
+function useEnvelope(fn, deps = []) {
+  const [env, setEnv] = useState(null);
+  const [erro, setErro] = useState(null);
+  const [carregando, setCarregando] = useState(true);
+  const recarregar = useCallback(() => {
+    setCarregando(true); setErro(null);
+    fn().then(setEnv).catch((e) => setErro(String(e.message || e))).finally(() => setCarregando(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+  useEffect(() => { recarregar(); }, [recarregar]);
+  return { env, erro, carregando, recarregar };
+}
+
 // ============ VISÃO 1: CATÁLOGO ============
 function Catalogo() {
+  const { env, erro, carregando } = useEnvelope(() => SondaAPI.catalogo());
+  const bases = env?.dados || [];
+  // proveniência vem como lista [{fonte, snapshots:[...]}] — lado a lado.
+  const provPorFonte = Array.isArray(env?.proveniencia) ? env.proveniencia : [];
+  const snapsDaBase = (entidade) =>
+    provPorFonte.flatMap((p) => (p.snapshots || []).filter((s) => s.entidade === entidade)
+      .map((s) => ({ ...s, fonte: p.fonte })));
+
   return (
     <div>
       <Lead n="01" titulo="Catálogo" sub="As bases agregadas, cada uma na sua língua. Nada é reconciliado à força." />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(240px,1fr))", gap: 14, marginTop: 20 }}>
-        {Object.entries(BASES).map(([k, b]) => (
-          <div key={k} style={{ background: S.carbonoSoft, border: `1px solid ${S.carbonoLine}`, borderTop: `3px solid ${b.cor}`, borderRadius: 8, padding: "16px 18px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ width: 9, height: 9, borderRadius: "50%", background: b.cor }} />
-              <span style={{ fontSize: 17, fontWeight: 700, color: S.osso, fontFamily: "'Archivo',sans-serif" }}>{b.label}</span>
-            </div>
-            <div style={{ fontSize: 11.5, color: S.sedimentoSoft, fontFamily: "'IBM Plex Mono',monospace", marginTop: 3 }}>{b.desc}</div>
-            <div style={{ marginTop: 14, fontSize: 12.5, lineHeight: 1.6, fontFamily: "'IBM Plex Mono',monospace", color: S.sedimentoSoft }}>
-              <div><span style={{ color: S.sedimento }}>regime:</span> <span style={{ color: S.osso }}>{b.regime}</span></div>
-              <div style={{ marginTop: 5 }}><span style={{ color: S.sedimento }}>entidade nativa:</span> <span style={{ color: S.osso }}>{b.entidade}</span></div>
+      <div style={{ marginTop: 20 }}>
+        <Estado carregando={carregando} erro={erro} vazio={bases.length === 0}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 14 }}>
+            {bases.map((b) => {
+              const cor = corDaBase(b.base);
+              const snaps = snapsDaBase(b.entidade_nativa);
+              const s0 = snaps[0];
+              return (
+                <div key={`${b.base}:${b.entidade_nativa}`} style={{ background: S.carbonoSoft, border: `1px solid ${S.carbonoLine}`, borderTop: `3px solid ${cor}`, borderRadius: 8, padding: "16px 18px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: cor }} />
+                    <span style={{ fontSize: 17, fontWeight: 700, color: S.osso, fontFamily: "'Archivo',sans-serif" }}>{b.base}</span>
+                  </div>
+                  <div style={{ marginTop: 12, fontSize: 12.5, lineHeight: 1.7, fontFamily: "'IBM Plex Mono',monospace", color: S.sedimentoSoft }}>
+                    <div><span style={{ color: S.sedimento }}>entidade nativa:</span> <span style={{ color: S.osso }}>{b.entidade_nativa}</span></div>
+                    <div><span style={{ color: S.sedimento }}>registros:</span> <span style={{ color: S.osso }}>{b.n_registros}</span></div>
+                    {s0 && <div><span style={{ color: S.sedimento }}>fonte:</span> <span style={{ color: S.osso }}>{s0.fonte}</span></div>}
+                    {s0 && <div><span style={{ color: S.sedimento }}>versão:</span> <span style={{ color: S.osso }}>{s0.instancia_versao}</span></div>}
+                  </div>
+                  {/* proveniência ao alcance de um clique (porosidade 2) */}
+                  {s0 && (
+                    <details style={{ marginTop: 10 }}>
+                      <summary style={{ cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: S.sonar }}>proveniência · {snaps.length} snapshot(s)</summary>
+                      {snaps.map((s) => (
+                        <div key={s.snapshot_id} style={{ marginTop: 6, fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: S.sedimentoSoft, lineHeight: 1.5 }}>
+                          <div>↳ {s.capturado_em}</div>
+                          <div style={{ color: S.sedimento }}>fixity: {String(s.fixity).slice(0, 16)}…</div>
+                          <div style={{ color: S.sedimento }}>retenção: {s.politica_retencao?.regime}</div>
+                        </div>
+                      ))}
+                    </details>
+                  )}
+                </div>
+              );
+            })}
+            {/* a vaga: o convite à expansão */}
+            <div style={{ background: "transparent", border: `1.5px dashed ${S.sinalDark}`, borderRadius: 8, padding: "16px 18px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: S.sinal, fontFamily: "'Archivo',sans-serif" }}>+ base faltante</div>
+              <div style={{ fontSize: 11.5, color: S.sedimentoSoft, fontFamily: "'IBM Plex Mono',monospace", marginTop: 6, lineHeight: 1.5 }}>
+                a Sonda cresce nas bordas. Cada elo ausente especifica o dataset que o preencheria.
+              </div>
             </div>
           </div>
-        ))}
-        {/* a vaga: o convite à expansão */}
-        <div style={{ background: "transparent", border: `1.5px dashed ${S.sinalDark}`, borderRadius: 8, padding: "16px 18px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: S.sinal, fontFamily: "'Archivo',sans-serif" }}>+ base faltante</div>
-          <div style={{ fontSize: 11.5, color: S.sedimentoSoft, fontFamily: "'IBM Plex Mono',monospace", marginTop: 6, lineHeight: 1.5 }}>
-            a Sonda cresce nas bordas. Cada elo ausente especifica o dataset que o preencheria.
-          </div>
-        </div>
+        </Estado>
       </div>
     </div>
   );
@@ -114,10 +150,10 @@ function Catalogo() {
 
 // ============ VISÃO 2: PERCURSO (rede generativa) ============
 const NOS = {
-  filme:      { t: "Filmes 2026", s: "lançados no ano", tipo: "factual", base: "OCA", x: 30, y: 60, w: 150, h: 54 },
-  salas:      { t: "Salas", s: "onde passou", tipo: "factual", base: "OCA", x: 280, y: 60, w: 150, h: 54 },
-  territorio: { t: "Território", s: "distribuição", tipo: "factual", base: "OCA", x: 280, y: 165, w: 150, h: 54 },
-  publico:    { t: "Público", s: "ingressos", tipo: "factual", base: "OCA", x: 60, y: 220, w: 150, h: 54 },
+  filme:      { t: "Agentes cinema", s: "Mapa Cultural", tipo: "factual", base: "mapa_cultural", x: 30, y: 60, w: 150, h: 54 },
+  salas:      { t: "Salas", s: "OCA", tipo: "factual", base: "oca", x: 280, y: 60, w: 150, h: 54 },
+  territorio: { t: "Território", s: "município", tipo: "factual", base: "oca", x: 280, y: 165, w: 150, h: 54 },
+  publico:    { t: "Público", s: "ingressos", tipo: "factual", base: "oca", x: 60, y: 220, w: 150, h: 54 },
   preco:      { t: "Preço médio", s: "renda ÷ público", tipo: "derivado", base: "—", x: 470, y: 220, w: 160, h: 54 },
   origem:     { t: "Origem do público", s: "elo ausente", tipo: "ausente", base: "—", x: 60, y: 330, w: 175, h: 56 },
 };
@@ -126,7 +162,7 @@ const ARESTAS = [
   ["salas", "publico", "factual"], ["publico", "preco", "derivado"],
   ["publico", "origem", "ausente"],
 ];
-function corTipo(t) { return t === "derivado" ? S.sonar : t === "ausente" ? S.sinal : S.sinal; }
+function corTipo(t) { return t === "derivado" ? S.sonar : S.sinal; }
 
 function Percurso() {
   const [sel, setSel] = useState(null);
@@ -147,7 +183,7 @@ function Percurso() {
               const e1 = c(de), e2 = c(pa); const col = corTipo(tipo);
               const on = sel === `e${i}`;
               return (
-                <g key={i} onClick={() => setSel(`e${i}`)} style={{ cursor: "pointer" }}>
+                <g key={i} onClick={() => setSel(pa === "origem" ? "origem" : `e${i}`)} style={{ cursor: "pointer" }}>
                   <line x1={e1.x} y1={e1.y} x2={e2.x} y2={e2.y} stroke="transparent" strokeWidth="16" />
                   <line x1={e1.x} y1={e1.y} x2={e2.x} y2={e2.y} stroke={col} strokeWidth={on ? 3.5 : 2}
                     strokeDasharray={tipo === "ausente" ? "6 5" : "0"} markerEnd="url(#au)" opacity={on ? 1 : 0.7} />
@@ -155,7 +191,7 @@ function Percurso() {
               );
             })}
             {Object.entries(NOS).map(([k, n]) => {
-              const col = n.tipo === "ausente" ? S.sinal : n.tipo === "derivado" ? S.sonar : S.sinal;
+              const col = n.tipo === "derivado" ? S.sonar : S.sinal;
               const on = sel === k;
               return (
                 <g key={k} onClick={() => setSel(k)} style={{ cursor: "pointer" }}>
@@ -179,34 +215,53 @@ function Percurso() {
 }
 
 function PainelPercurso({ sel }) {
-  if (sel === "origem" || sel === "e4") {
+  const ehAusente = sel === "origem";
+  // o contrato real vem da API: executa o cruzamento de base faltante.
+  const { env, erro, carregando } = useEnvelope(async () => {
+    if (!ehAusente) return null;
+    const lista = await SondaAPI.cruzamentos();
+    const cAusente = (lista.dados || []).find((x) => /faltante/i.test(x.nome));
+    if (!cAusente) return null;
+    return SondaAPI.executar(cAusente.id);
+  }, [ehAusente]);
+
+  if (ehAusente) {
+    const contrato = env?.dados?.achados?.contrato;
     return (
       <div style={{ background: S.carbonoSoft, border: `1.5px dashed ${S.sinal}`, borderRadius: 8, padding: "18px 18px" }}>
         <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, fontWeight: 700, color: S.sinal, letterSpacing: ".05em" }}>
           ⚠ ELO AUSENTE · CONTRATO DE BASE FALTANTE
         </div>
-        <div style={{ fontSize: 13, color: S.osso, lineHeight: 1.55, marginTop: 10 }}>
-          <b>O dado não existe</b> em nenhuma base agregada. Para prosseguir, é preciso nova coleta.
-        </div>
-        <div style={{ marginTop: 14, padding: "13px 14px", background: "rgba(255,61,46,.06)", borderLeft: `3px solid ${S.sinal}`, borderRadius: 3 }}>
-          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: S.sinal, fontWeight: 700, marginBottom: 6 }}>PERGUNTA DE PESQUISA</div>
-          <div style={{ fontSize: 14.5, fontStyle: "italic", color: S.osso, lineHeight: 1.5, fontFamily: "'Newsreader',serif" }}>
-            De onde vem o público que assiste aos filmes — e como a procedência do espectador se relaciona com a origem territorial da obra?
-          </div>
-        </div>
-        <div style={{ marginTop: 12, fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: S.sedimento, fontWeight: 700 }}>
-          EIXO DE LIGAÇÃO — hipótese a confirmar
-        </div>
-        {["por CEP do espectador → sala", "por sessão → amostra de público", "por município de residência declarado"].map((h, i) => (
-          <div key={i} style={{ fontSize: 12, color: S.sedimentoSoft, fontFamily: "'IBM Plex Mono',monospace", padding: "4px 0" }}>
-            <span style={{ color: S.sinal }}>?</span> {h}
-          </div>
-        ))}
+        <Estado carregando={carregando} erro={erro} vazio={!contrato}>
+          {contrato && (
+            <>
+              {/* o coração: a PERGUNTA de pesquisa, no topo */}
+              <div style={{ marginTop: 14, padding: "13px 14px", background: "rgba(255,61,46,.06)", borderLeft: `3px solid ${S.sinal}`, borderRadius: 3 }}>
+                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: S.sinal, fontWeight: 700, marginBottom: 6 }}>PERGUNTA DE PESQUISA</div>
+                <div style={{ fontSize: 14.5, fontStyle: "italic", color: S.osso, lineHeight: 1.5, fontFamily: "'Newsreader',serif" }}>
+                  {contrato.pergunta_de_pesquisa}
+                </div>
+              </div>
+              {/* o eixo é hipótese a confirmar, abaixo, com '?' */}
+              <div style={{ marginTop: 12, fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: S.sedimento, fontWeight: 700 }}>
+                EIXO DE LIGAÇÃO ({contrato.eixo_de_ligacao_hipotese?.eixo}) — hipótese a confirmar
+              </div>
+              {(contrato.eixo_de_ligacao_hipotese?.hipoteses || []).map((h, i) => (
+                <div key={i} style={{ fontSize: 12, color: S.sedimentoSoft, fontFamily: "'IBM Plex Mono',monospace", padding: "4px 0" }}>
+                  <span style={{ color: S.sinal }}>?</span> {h}
+                </div>
+              ))}
+              <div style={{ marginTop: 10, fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: S.sedimento }}>
+                retenção: {contrato.regime_retencao}
+              </div>
+            </>
+          )}
+        </Estado>
       </div>
     );
   }
-  const k = sel && !sel.startsWith("e") ? sel : null;
-  const n = k ? NOS[k] : null;
+
+  const n = sel && NOS[sel] && !sel.startsWith("e") ? NOS[sel] : null;
   return (
     <div style={{ background: S.carbonoSoft, border: `1px solid ${S.carbonoLine}`, borderRadius: 8, padding: "18px 18px", minHeight: 120 }}>
       {!n && <div style={{ color: S.sedimentoSoft, fontStyle: "italic", fontSize: 13.5, fontFamily: "'Newsreader',serif" }}>Selecione um nó ou aresta para inspecionar a proveniência. O elo tracejado abre o contrato da base faltante.</div>}
@@ -217,7 +272,7 @@ function PainelPercurso({ sel }) {
             {n.tipo === "derivado" ? "nó derivado · não é dado primário" : `nó factual · base ${n.base}`}
           </div>
           <div style={{ marginTop: 12, padding: "10px 12px", background: S.carbono, borderRadius: 4, fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, color: S.sedimentoSoft }}>
-            ↳ {n.tipo === "derivado" ? "preço = renda / público (mesma sessão)" : "proveniência: ligação registrada no OCA por CPB/sessão"}
+            ↳ {n.tipo === "derivado" ? "preço = renda / público (mesma sessão)" : `proveniência: registro nativo de ${n.base}`}
           </div>
         </div>
       )}
@@ -225,37 +280,56 @@ function PainelPercurso({ sel }) {
   );
 }
 
-// ============ VISÃO 3: TRAJETÓRIA (série temporal) ============
-const SERIE = [
-  { d: "11/25", lig: 41, orf: 96, mig: false },
-  { d: "01/26", lig: 53, orf: 88, mig: false },
-  { d: "03/26", lig: 57, orf: 90, mig: false },
-  { d: "04/26", lig: 55, orf: 92, mig: true },
-  { d: "05/26", lig: 69, orf: 81, mig: false },
-];
+// ============ VISÃO 3: TRAJETÓRIA (série temporal real) ============
 function Trajetoria() {
-  const [hv, setHv] = useState(null);
-  const W = 640, H = 240, pL = 38, pR = 16, pT = 18, pB = 42;
-  const iW = W - pL - pR, iH = H - pT - pB;
-  const maxY = Math.max(...SERIE.flatMap(s => [s.lig, s.orf])) * 1.2;
-  const x = i => pL + (i / (SERIE.length - 1)) * iW;
-  const y = v => pT + iH - (v / maxY) * iH;
-  const line = key => SERIE.map((s, i) => `${i ? "L" : "M"} ${x(i)} ${y(s[key])}`).join(" ");
-  const taxa = Math.round(SERIE[4].lig / (SERIE[4].lig + SERIE[4].orf) * 100);
+  // escolhe o primeiro cruzamento executável e lê sua série.
+  const { env: lista } = useEnvelope(() => SondaAPI.cruzamentos());
+  const candidatos = (lista?.dados || []).filter((c) => c.execucoes > 0 && !/faltante/i.test(c.nome));
+  const cid = candidatos[0]?.id;
+  const { env, erro, carregando } = useEnvelope(async () => (cid ? SondaAPI.cruzamento(cid) : null), [cid]);
+  const serie = (env?.dados?.serie || []).map((s) => ({
+    d: new Date(s.data).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
+    lig: s.ligados, orf: s.orfaos, mig: s.tipo === "migracao",
+  }));
+
   return (
     <div>
       <Lead n="03" titulo="Trajetória" sub="O cruzamento como série temporal. A regra é fixa; a variação mede o mundo." />
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, margin: "20px 0 16px" }}>
+      <div style={{ marginTop: 20 }}>
+        <Estado carregando={carregando} erro={erro} vazio={serie.length === 0}>
+          <GraficoSerie serie={serie} nome={env?.dados?.nome} />
+        </Estado>
+      </div>
+    </div>
+  );
+}
+
+function GraficoSerie({ serie, nome }) {
+  const [hv, setHv] = useState(null);
+  const W = 640, H = 240, pL = 38, pR = 16, pT = 18, pB = 42;
+  const iW = W - pL - pR, iH = H - pT - pB;
+  const maxY = Math.max(1, ...serie.flatMap((s) => [s.lig, s.orf])) * 1.2;
+  const n = serie.length;
+  const x = (i) => pL + (n > 1 ? (i / (n - 1)) * iW : iW / 2);
+  const y = (v) => pT + iH - (v / maxY) * iH;
+  const line = (key) => serie.map((s, i) => `${i ? "L" : "M"} ${x(i)} ${y(s[key])}`).join(" ");
+  const ult = serie[n - 1] || { lig: 0, orf: 0 };
+  const prim = serie[0] || { lig: 0, orf: 0 };
+  const taxa = ult.lig + ult.orf ? Math.round((ult.lig / (ult.lig + ult.orf)) * 100) : 0;
+  return (
+    <>
+      {nome && <Mono cor={S.sedimentoSoft}>↳ {nome}</Mono>}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, margin: "12px 0 16px" }}>
         <Metric label="taxa de ligação" v={`${taxa}%`} cor={S.sonar} />
-        <Metric label="Δ ligações" v={`+${SERIE[4].lig - SERIE[0].lig}`} cor={S.sonar} />
-        <Metric label="Δ órfãos" v={`${SERIE[4].orf - SERIE[0].orf}`} cor={S.sinal} />
+        <Metric label="Δ ligações" v={`${ult.lig - prim.lig >= 0 ? "+" : ""}${ult.lig - prim.lig}`} cor={S.sonar} />
+        <Metric label="Δ órfãos" v={`${ult.orf - prim.orf >= 0 ? "+" : ""}${ult.orf - prim.orf}`} cor={S.sinal} />
       </div>
       <div style={{ background: S.carbonoSoft, border: `1px solid ${S.carbonoLine}`, borderRadius: 8, padding: "14px 16px 6px" }}>
         <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto" }}>
           {[0, 0.5, 1].map((f, i) => { const yy = pT + iH - f * iH; return <line key={i} x1={pL} y1={yy} x2={W - pR} y2={yy} stroke={S.carbonoLine} strokeDasharray="2 4" />; })}
           <path d={line("orf")} fill="none" stroke={S.sinal} strokeWidth="2" strokeDasharray="5 4" opacity="0.85" />
           <path d={line("lig")} fill="none" stroke={S.sonar} strokeWidth="2.5" />
-          {SERIE.map((s, i) => (
+          {serie.map((s, i) => (
             <g key={i} onMouseEnter={() => setHv(i)} onMouseLeave={() => setHv(null)} style={{ cursor: "pointer" }}>
               <rect x={x(i) - 14} y={pT} width="28" height={iH} fill={hv === i ? "rgba(255,255,255,.03)" : "transparent"} />
               <circle cx={x(i)} cy={y(s.orf)} r={hv === i ? 5.5 : 3.5} fill={S.sinal} />
@@ -270,55 +344,116 @@ function Trajetoria() {
           </g>
         </svg>
         <div style={{ minHeight: 30, padding: "6px 2px" }}>
-          {hv != null && (
-            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, color: SERIE[hv].mig ? S.sinal : S.sedimentoSoft }}>
-              {SERIE[hv].mig ? "⚠ " : "→ "}{SERIE[hv].d} · ligações {SERIE[hv].lig} · órfãos {SERIE[hv].orf}
-              {SERIE[hv].mig ? " · variação por migração de esquema, não fenômeno real" : ""}
+          {hv != null && serie[hv] && (
+            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, color: serie[hv].mig ? S.sinal : S.sedimentoSoft }}>
+              {serie[hv].mig ? "⚠ " : "→ "}{serie[hv].d} · ligações {serie[hv].lig} · órfãos {serie[hv].orf}
+              {serie[hv].mig ? " · variação por migração de esquema, não fenômeno real" : ""}
             </span>
           )}
         </div>
       </div>
-    </div>
+    </>
   );
 }
 
 // ============ VISÃO 4: CRUZAMENTOS ============
 function Cruzamentos() {
-  const [forks, setForks] = useState([]);
+  const { env, erro, carregando, recarregar } = useEnvelope(() => SondaAPI.cruzamentos());
+  const cruzamentos = env?.dados || [];
   return (
     <div>
       <Lead n="04" titulo="Cruzamentos" sub="Objetos persistentes: assinados, versionados, bifurcáveis. A receita, não o resultado." />
-      <div style={{ background: S.carbonoSoft, border: `1px solid ${S.carbonoLine}`, borderTop: `4px solid ${S.osso}`, borderRadius: 8, padding: "18px 20px", marginTop: 20 }}>
-        <div style={{ fontSize: 19, fontWeight: 700, color: S.osso, fontFamily: "'Archivo',sans-serif" }}>Fomento LPG → obras formalizadas no OCA</div>
-        <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: S.sedimentoSoft, marginTop: 4 }}>
-          x-0001 · regra v2 · assinado por <span style={{ color: S.osso }}>Isaac (UFF)</span>
-        </div>
-        <div style={{ marginTop: 14, padding: "12px 14px", background: S.carbono, borderRadius: 4, fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: S.sedimentoSoft, lineHeight: 1.7 }}>
-          <div style={{ color: S.osso, fontWeight: 700, marginBottom: 4 }}>↳ receita (re-executável)</div>
-          <div><span style={{ color: S.sedimento }}>eixo:</span> CNPJ do proponente</div>
-          <div><span style={{ color: S.sedimento }}>regra:</span> igualdade estrita; pessoa-física entra como órfão</div>
-          <div><span style={{ color: S.sedimento }}>versões-fonte:</span> LPG[rel. gestão] · OCA[PDA 2023-24]</div>
-        </div>
-        <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-          <button onClick={() => setForks(f => [...f, f.length])}
-            style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 600, padding: "9px 14px", borderRadius: 4, border: `1px solid ${S.sonar}`, background: "transparent", color: S.sonar, cursor: "pointer" }}>
-            ⑂ bifurcar (discordar da regra)
-          </button>
-        </div>
-        {forks.map((f, i) => (
-          <div key={i} style={{ marginTop: 10, padding: "11px 13px", background: S.carbono, borderLeft: `3px solid ${S.sonar}`, borderRadius: 3 }}>
-            <div style={{ fontSize: 13.5, color: S.osso, fontWeight: 600 }}>Fomento LPG → obras (bifurcação {i + 1})</div>
-            <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: S.sonar, marginTop: 4 }}>
-              x-{String(i + 2).padStart(4, "0")} · derivado de x-0001 · regra alterada: incluir match por nome+município
-            </div>
+      <div style={{ marginTop: 20 }}>
+        <Estado carregando={carregando} erro={erro} vazio={cruzamentos.length === 0}>
+          <div style={{ display: "grid", gap: 14 }}>
+            {cruzamentos.map((c) => <CartaoCruzamento key={c.id} c={c} aoMudar={recarregar} />)}
           </div>
-        ))}
+        </Estado>
       </div>
     </div>
   );
 }
 
+function CartaoCruzamento({ c, aoMudar }) {
+  const [det, setDet] = useState(null);
+  const [exec, setExec] = useState(null);
+  const [ocupado, setOcupado] = useState(false);
+  const ausente = /faltante/i.test(c.nome);
+
+  const abrir = async () => { if (!det) setDet((await SondaAPI.cruzamento(c.id)).dados); };
+  const executar = async () => {
+    setOcupado(true);
+    try { setExec((await SondaAPI.executar(c.id)).dados); aoMudar?.(); }
+    finally { setOcupado(false); }
+  };
+  const bifurcar = async () => {
+    const base = det || (await SondaAPI.cruzamento(c.id)).dados;
+    setOcupado(true);
+    try {
+      await SondaAPI.bifurcar(c.id, {
+        nome: `${c.nome} (bifurcação)`, autor: c.autor, eixo: base.receita.eixo,
+        esquerda: base.receita.esquerda, direita: base.receita.direita,
+        regra: base.receita.regra === "igualdade_estrita" ? "igualdade_normalizada" : "igualdade_estrita",
+        versoes_fonte: base.receita.versoes_fonte || [], versao_regra: "v2",
+        base_faltante: base.receita.base_faltante || null,
+      });
+      aoMudar?.();
+    } finally { setOcupado(false); }
+  };
+
+  const cor = ausente ? S.sinal : S.osso;
+  return (
+    <div style={{ background: S.carbonoSoft, border: `1px solid ${S.carbonoLine}`, borderTop: `4px solid ${cor}`, borderRadius: 8, padding: "18px 20px" }}>
+      <div style={{ fontSize: 18, fontWeight: 700, color: S.osso, fontFamily: "'Archivo',sans-serif" }}>{c.nome}</div>
+      <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: S.sedimentoSoft, marginTop: 4 }}>
+        {String(c.id).slice(0, 8)} · regra {c.versao_regra} · assinado por <span style={{ color: S.osso }}>{c.autor}</span>
+        {c.derivado_de && <> · <span style={{ color: S.sonar }}>⑂ derivado de {String(c.derivado_de).slice(0, 8)}</span></>}
+        {" · "}<span style={{ color: S.sonar }}>{c.execucoes} execução(ões)</span>
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
+        <Botao cor={S.sonar} onClick={abrir}>ver receita</Botao>
+        <Botao cor={S.sinal} onClick={executar} ocupado={ocupado}>▶ executar</Botao>
+        <Botao cor={S.sonar} onClick={bifurcar} ocupado={ocupado}>⑂ bifurcar (discordar da regra)</Botao>
+      </div>
+
+      {det && (
+        <div style={{ marginTop: 14, padding: "12px 14px", background: S.carbono, borderRadius: 4, fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: S.sedimentoSoft, lineHeight: 1.7 }}>
+          <div style={{ color: S.osso, fontWeight: 700, marginBottom: 4 }}>↳ receita (re-executável)</div>
+          <div><span style={{ color: S.sedimento }}>eixo:</span> {det.receita.eixo}</div>
+          <div><span style={{ color: S.sedimento }}>regra:</span> {det.receita.regra}</div>
+          {det.receita.base_faltante && <div><span style={{ color: S.sinal }}>base faltante:</span> {det.receita.base_faltante.pergunta}</div>}
+        </div>
+      )}
+
+      {exec && (
+        <div style={{ marginTop: 12, padding: "11px 13px", background: S.carbono, borderLeft: `3px solid ${exec.executavel ? S.sonar : S.sinal}`, borderRadius: 3, fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5 }}>
+          {exec.executavel ? (
+            <span style={{ color: S.osso }}>
+              <span style={{ color: S.sonar }}>{exec.ligados} ligados</span> ·{" "}
+              <span style={{ color: S.sinal }}>{exec.orfaos_esquerda + exec.orfaos_direita} órfãos</span> (achado, não escondido)
+            </span>
+          ) : (
+            <span style={{ color: S.sinal }}>⚠ base faltante — contrato gerado: “{exec.achados?.contrato?.pergunta_de_pesquisa}”</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ——— helpers ———
+function Botao({ cor, onClick, ocupado, children }) {
+  return (
+    <button onClick={onClick} disabled={ocupado}
+      style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, fontWeight: 600, padding: "9px 14px", borderRadius: 4, border: `1px solid ${cor}`, background: "transparent", color: cor, cursor: ocupado ? "wait" : "pointer", opacity: ocupado ? 0.5 : 1 }}>
+      {children}
+    </button>
+  );
+}
+function Mono({ cor, children }) {
+  return <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: cor, padding: "8px 0" }}>{children}</div>;
+}
 function Lead({ n, titulo, sub }) {
   return (
     <div style={{ borderLeft: `3px solid ${S.sinal}`, paddingLeft: 14 }}>
@@ -347,8 +482,8 @@ const VISOES = [
 ];
 
 export default function SondaApp() {
-  const [v, setV] = useState("percurso");
-  const Atual = VISOES.find(x => x.id === v).comp;
+  const [v, setV] = useState("catalogo");
+  const Atual = VISOES.find((x) => x.id === v).comp;
   return (
     <div style={{ minHeight: "100vh", background: S.carbono, color: S.osso, fontFamily: "'Newsreader',Georgia,serif" }}>
       <style>{`
@@ -358,16 +493,17 @@ export default function SondaApp() {
         .nav-btn:hover { color: ${S.osso}; }
         @keyframes fade { from {opacity:0; transform: translateY(6px);} to {opacity:1; transform:none;} }
         .view { animation: fade .25s ease; }
+        summary::-webkit-details-marker { color: ${S.sonar}; }
       `}</style>
 
       <div style={{ maxWidth: 940, margin: "0 auto", padding: "32px 26px 70px" }}>
         <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 16, paddingBottom: 20, borderBottom: `1px solid ${S.carbonoLine}` }}>
           <Wordmark />
-          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: S.sedimento }}>protótipo unificado · espectro 1.0</span>
+          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: S.sedimento }}>protótipo unificado · espectro 1.0 · API real</span>
         </header>
 
         <nav style={{ display: "flex", gap: 4, margin: "20px 0 28px", flexWrap: "wrap", background: S.carbonoSoft, padding: 5, borderRadius: 8, border: `1px solid ${S.carbonoLine}`, width: "fit-content" }}>
-          {VISOES.map(x => (
+          {VISOES.map((x) => (
             <button key={x.id} className="nav-btn" onClick={() => setV(x.id)}
               style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12.5, fontWeight: 600, padding: "8px 16px", borderRadius: 5, border: "none",
                 background: v === x.id ? S.sinal : "transparent", color: v === x.id ? S.carbono : S.sedimentoSoft, cursor: "pointer" }}>
@@ -379,7 +515,7 @@ export default function SondaApp() {
         <div className="view" key={v}><Atual /></div>
 
         <footer style={{ borderTop: `1px solid ${S.carbonoLine}`, marginTop: 44, paddingTop: 16, fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: S.sedimento, lineHeight: 1.7 }}>
-          <div>Carbono ancora · Sinal interfere · Sonar lê. Dados: fac-símiles de estrutura, fiéis à sondagem das bases.</div>
+          <div>Carbono ancora · Sinal interfere · Sonar lê. Dados servidos pela API real, com proveniência em toda resposta.</div>
           <div>UFF · Observatório de Dados e Políticas do Audiovisual · incomensurabilidade · proveniência · generatividade.</div>
         </footer>
       </div>
