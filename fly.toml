@@ -1,0 +1,21 @@
+# Deploy do backend no Fly.io (um contêiner). Postgres gerenciado é externo
+# (defina o segredo:  fly secrets set SONDA_DATABASE_URL=postgresql://...pooled...).
+app = "sonda-api"
+primary_region = "gru"  # São Paulo
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[env]
+  SONDA_POOL_MAX = "10"

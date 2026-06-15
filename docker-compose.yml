@@ -1,0 +1,20 @@
+# Um só serviço de banco (decisão de arquitetura: corta-se infra, nunca princípio).
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: sonda
+      POSTGRES_PASSWORD: sonda
+      POSTGRES_DB: sonda
+    ports:
+      - "5432:5432"
+    volumes:
+      - sonda_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sonda"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  sonda_pg:

@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+# saída de coleta (dado coletado vive fora do versionamento)
+sonda_mapas_cinema_*.json
+.env

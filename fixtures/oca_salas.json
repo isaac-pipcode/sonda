@@ -1,0 +1,21 @@
+{
+  "proveniencia": {
+    "fonte": "dados.gov.br/OCA (Ancine)",
+    "instancia_versao": "fac-símile-offline · PDA salas",
+    "entidade": "sala_de_exibicao",
+    "query": {"recorte": "salas ativas por município"},
+    "coletado_em": "2026-05-02T12:30:00+00:00",
+    "n_registros": 6,
+    "saneamento": ["FAC-SÍMILE de estrutura para teste offline", "notas técnicas do CSV original NÃO removidas aqui (dado sintético)"],
+    "regime_retencao": "a definir pela prática"
+  },
+  "fixity_do_lote": null,
+  "registros": [
+    {"cnpj": "00.001/0001-00", "razao_social": "Multiplex Rio", "municipio": "Rio de Janeiro", "uf": "RJ", "salas": 12},
+    {"cnpj": "00.002/0001-00", "razao_social": "Cine São Paulo Centro", "municipio": "São Paulo", "uf": "SP", "salas": 8},
+    {"cnpj": "00.003/0001-00", "razao_social": "Cinema Belém Plaza", "municipio": "Belém", "uf": "PA", "salas": 4},
+    {"cnpj": "00.004/0001-00", "razao_social": "Sala Curitiba Norte", "municipio": "Curitiba", "uf": "PR", "salas": 6},
+    {"cnpj": "00.005/0001-00", "razao_social": "Cine Salvador", "municipio": "Salvador", "uf": "BA", "salas": 5},
+    {"cnpj": "00.006/0001-00", "razao_social": "Cinema Fortaleza Iguatemi", "municipio": "Fortaleza", "uf": "CE", "salas": 9}
+  ]
+}
