@@ -6,7 +6,6 @@ web/node_modules
 web/dist
 docs
 *.docx
-app.py
 SondaApp.jsx
 sonda_api_client.js
 sonda_design_tokens.js
