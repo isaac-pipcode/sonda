@@ -85,6 +85,39 @@ python -c "from sonda.ingest import ingerir_arquivo; \
 pytest tests/ -q      # motor de cruzamento (DuckDB, sem banco)
 ```
 
+## Deploy (estratégia Split)
+
+O backend é um **contêiner sempre-ligado** (README §4: "1 VM/contêiner"); o
+Postgres é **gerenciado e externo**, livre para escalar; o frontend é **estático
+na Vercel**. Nenhuma das sete decisões muda — só a topologia.
+
+```
+Vercel (web/)  ──VITE_SONDA_API──▶  Backend FastAPI+DuckDB (Fly/Render)  ──▶  Postgres gerenciado (Neon/Supabase)
+SondaApp.jsx                         Dockerfile · pool de conexões              JSONB · snapshots append-only
+```
+
+**1. Postgres gerenciado** (Neon/Supabase). Crie o banco e copie a connection
+string **pooled** (no Neon, o host com `-pooler`). O pool de conexões
+(`psycopg_pool`) evita esgotar o limite quando o banco escala.
+
+**2. Backend** (Fly.io de exemplo; Render/Railway equivalem):
+```bash
+fly launch --no-deploy          # usa o Dockerfile e fly.toml
+fly secrets set SONDA_DATABASE_URL="postgresql://…-pooler…/sonda?sslmode=require"
+fly deploy
+# carregar dados de teste (fac-símiles) uma vez:
+fly ssh console -C "python seed.py"
+```
+
+**3. Frontend** (Vercel): aponte o projeto para o diretório `web/` (Root
+Directory = `web`). A detecção de Vite + `web/vercel.json` cuidam do build.
+Defina a variável de ambiente:
+```
+VITE_SONDA_API = https://<seu-backend>.fly.dev
+```
+
+Variáveis em `.env.example`. CORS já está liberado na API para o frontend.
+
 ## Definição de pronto (README §9) — estado
 
 - [x] Coleta com proveniência + fixity (`coleta_real_mapas.py`; fac-símile em `fixtures/`)

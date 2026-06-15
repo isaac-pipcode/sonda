@@ -14,6 +14,8 @@ class Config:
     database_url: str
     # default do regime de retenção: a classificação é adiada à prática (decisão 7).
     regime_retencao_default: str = "a definir pela prática"
+    # pool de conexões — importa para Postgres gerenciado que escala (Neon/Supabase).
+    pool_max: int = 10
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -23,6 +25,7 @@ class Config:
                 # default de desenvolvimento; sobrescreva em produção.
                 "postgresql://sonda:sonda@localhost:5432/sonda",
             ),
+            pool_max=int(os.environ.get("SONDA_POOL_MAX", "10")),
         )
 
 
