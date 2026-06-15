@@ -1,0 +1,21 @@
+{
+  "proveniencia": {
+    "fonte": "https://mapas.cultura.gov.br",
+    "instancia_versao": "fac-símile-offline (rede não disponível no sandbox)",
+    "entidade": "agent",
+    "query": {"term:linguagem": "LIKE(Cinema)", "@select": "id,name,terms,location,createTimestamp"},
+    "coletado_em": "2026-05-02T12:00:00+00:00",
+    "n_registros": 6,
+    "saneamento": ["FAC-SÍMILE de estrutura para teste offline; substituir pela coleta real de coleta_real_mapas.py"],
+    "regime_retencao": "a definir pela prática"
+  },
+  "fixity_do_lote": null,
+  "registros": [
+    {"id": 101, "name": "Cineclube Maré", "terms": {"linguagem": ["Cinema", "Audiovisual"]}, "location": {"municipio": "Rio de Janeiro", "uf": "RJ"}, "createTimestamp": "2019-03-01"},
+    {"id": 102, "name": "Produtora Sertão Filmes", "terms": {"linguagem": ["Cinema"]}, "location": {"municipio": "Fortaleza", "uf": "CE"}, "createTimestamp": "2020-07-12"},
+    {"id": 103, "name": "Coletivo Audiovisual Amazônia", "terms": {"linguagem": ["Cinema"]}, "location": {"municipio": "Belém", "uf": "PA"}, "createTimestamp": "2018-11-20"},
+    {"id": 104, "name": "Mostra de Cinema de Tiradentes", "terms": {"linguagem": ["Cinema"]}, "location": {"municipio": "Tiradentes", "uf": "MG"}, "createTimestamp": "2017-01-05"},
+    {"id": 105, "name": "Núcleo Cinema São Paulo", "terms": {"linguagem": ["Cinema"]}, "location": {"municipio": "São Paulo", "uf": "SP"}, "createTimestamp": "2021-09-30"},
+    {"id": 106, "name": "Cinema na Fronteira", "terms": {"linguagem": ["Cinema"]}, "location": {"municipio": "Foz do Iguaçu", "uf": "PR"}, "createTimestamp": "2022-04-18"}
+  ]
+}
