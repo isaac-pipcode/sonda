@@ -109,8 +109,11 @@ fly deploy
 fly ssh console -C "python seed.py"
 ```
 
-**3. Frontend** (Vercel): aponte o projeto para o diretório `web/` (Root
-Directory = `web`). A detecção de Vite + `web/vercel.json` cuidam do build.
+**3. Frontend** (Vercel): o jeito limpo é apontar o **Root Directory = `web`**
+nas configurações do projeto Vercel — assim a Vercel vê só o app Vite e nunca o
+`app.py`/`requirements.txt` da raiz (que disparariam o builder Python por engano).
+Como rede de segurança, há um `vercel.json` na raiz que força o build só do
+frontend (`framework: null`, build de `web/`), caso o Root Directory fique na raiz.
 Defina a variável de ambiente:
 ```
 VITE_SONDA_API = https://<seu-backend>.fly.dev
