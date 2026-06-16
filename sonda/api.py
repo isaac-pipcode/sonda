@@ -83,6 +83,17 @@ def raiz():
     )
 
 
+@app.get("/health")
+def health():
+    """Healthcheck para a plataforma (Fly/Render). Verifica o banco."""
+    try:
+        with connect() as conn:
+            conn.execute("SELECT 1")
+        return {"status": "ok", "banco": "ok", "servido_em": agora_utc()}
+    except Exception as e:
+        raise HTTPException(503, f"banco indisponível: {type(e).__name__}")
+
+
 # ── catálogo: as bases lado a lado, na língua própria (porosidade ontológica) ─
 @app.get("/api/catalogo")
 def catalogo():
