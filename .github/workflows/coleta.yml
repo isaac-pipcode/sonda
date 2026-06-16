@@ -1,0 +1,56 @@
+name: Coleta (cron leve)
+
+# Coleta periódica do Mapa Cultural → ingestão como novo snapshot datado.
+# Cada execução é um evento imutável: o histórico só cresce (decisões 6 e 7).
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # toda segunda, 06:00 UTC
+  workflow_dispatch: {}    # permite disparo manual
+
+# evita coletas concorrentes pisando uma na outra
+concurrency:
+  group: coleta-mapas
+  cancel-in-progress: false
+
+jobs:
+  coleta:
+    name: coletar + ingerir (Mapa Cultural · Cinema)
+    runs-on: ubuntu-latest
+    env:
+      SONDA_DATABASE_URL: ${{ secrets.SONDA_DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Instalar dependências do backend
+        run: pip install -r requirements-backend.txt
+
+      - name: Conferir segredo do banco
+        run: |
+          if [ -z "$SONDA_DATABASE_URL" ]; then
+            echo "::error::Defina o segredo SONDA_DATABASE_URL (connection string POOLED do Postgres gerenciado)."
+            exit 1
+          fi
+
+      - name: Coleta real (API do Mapa Cultural)
+        run: python coleta_real_mapas.py   # grava sonda_mapas_cinema_AAAA-MM-DD.json
+
+      - name: Ingerir como novo snapshot datado
+        run: |
+          python - <<'PY'
+          import glob
+          from sonda.ingest import ingerir_arquivo
+          arq = sorted(glob.glob("sonda_mapas_cinema_*.json"))[-1]
+          res = ingerir_arquivo(arq, "mapa_cultural")
+          print(f"[coleta] ingerido {arq}: snapshot={res['snapshot_id']} "
+                f"n={res['n_registros']} fixity={res['fixity'][:16]}…")
+          PY
+
+      - name: Guardar o JSON coletado como artefato (proveniência)
+        uses: actions/upload-artifact@v4
+        with:
+          name: coleta-mapas-${{ github.run_id }}
+          path: sonda_mapas_cinema_*.json
+          retention-days: 90

@@ -121,6 +121,15 @@ VITE_SONDA_API = https://<seu-backend>.fly.dev
 
 Variáveis em `.env.example`. CORS já está liberado na API para o frontend.
 
+### Cron de ingestão
+
+`.github/workflows/coleta.yml` roda toda segunda (06:00 UTC) e por disparo
+manual: coleta do Mapa Cultural (`coleta_real_mapas.py`) e ingere como **novo
+snapshot datado** — append-only, o histórico só cresce (decisões 6 e 7). O JSON
+coletado é guardado como artefato (proveniência). Requer o segredo de
+repositório **`SONDA_DATABASE_URL`** (a mesma connection string pooled do banco
+gerenciado). Defina em *Settings → Secrets and variables → Actions*.
+
 ## Definição de pronto (README §9) — estado
 
 - [x] Coleta com proveniência + fixity (`coleta_real_mapas.py`; fac-símile em `fixtures/`)
