@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
-from . import engine
+from . import engine, fsa
 from .db import connect, init_schema
 from .provenance import agora_utc, envelope, fixity
 
@@ -77,7 +77,8 @@ def raiz():
             "servico": "SONDA",
             "lema": "Carbono ancora. Sinal interfere. Sonar lê.",
             "recursos": ["/api/catalogo", "/api/raw/{base}", "/api/snapshots",
-                         "/api/cruzamentos"],
+                         "/api/cruzamentos", "/api/fsa/tabelas",
+                         "/api/fsa/dicionario", "/api/fsa/consulta/{nome}"],
         },
         proveniencia={"fonte": "sonda", "nota": "infraestrutura, não fonte primária"},
     )
@@ -138,6 +139,22 @@ def catalogo():
         }
         for r in rows
     ]
+
+    # FSA entra como base de primeira classe, na língua própria (não fundida).
+    if fsa.disponivel():
+        inv = fsa.inventario()["itens"]
+        prov_fsa = fsa.proveniencia_base()  # calcula fixity uma vez
+        catalogo_dados.append({
+            "base": fsa.BASE,
+            "entidade_nativa": "base_relacional_fsa (fatos · dimensões · visões)",
+            "n_registros": sum(i["registros"] or 0 for i in inv),
+            "tabelas_e_visoes": len(inv),
+            "acesso": "/api/fsa/tabelas · /api/fsa/dicionario · /api/fsa/consulta/{nome}",
+        })
+        prov_por_base.setdefault(prov_fsa["fonte"], []).append(
+            {"instancia_versao": prov_fsa["instancia_versao"],
+             "entidade": "base_relacional_fsa", "fixity": prov_fsa["fixity"]}
+        )
     return envelope(
         catalogo_dados,
         proveniencia=[{"fonte": k, "snapshots": v} for k, v in prov_por_base.items()],
@@ -176,7 +193,9 @@ def snapshots():
     with connect() as conn:
         rows = conn.execute(
             """SELECT snapshot_id, fonte, instancia_versao, entidade, capturado_em,
-                      fixity, politica_retencao, jsonb_array_length(carga) AS n
+                      fixity, politica_retencao,
+                      CASE WHEN jsonb_typeof(carga) = 'array'
+                           THEN jsonb_array_length(carga) END AS n
                FROM snapshot ORDER BY capturado_em DESC"""
         ).fetchall()
     dados = [
@@ -193,6 +212,57 @@ def snapshots():
         for r in rows
     ]
     return envelope(dados, proveniencia={"fonte": "sonda", "nota": "instantâneos imutáveis (append-only)"})
+
+
+# ── base FSA: dataset de segunda ordem lido in-place (na língua própria) ──────
+def _exige_fsa():
+    if not fsa.disponivel():
+        raise HTTPException(404, "base FSA indisponível (defina SONDA_FSA_DB ou inclua data/fsa.db)")
+
+
+@app.get("/api/fsa/tabelas")
+def fsa_tabelas():
+    """Inventário das tabelas/visões da FSA — na ontologia própria da base."""
+    _exige_fsa()
+    inv = fsa.inventario()["itens"]
+    return envelope(inv, proveniencia=fsa.proveniencia_base())
+
+
+@app.get("/api/fsa/dicionario")
+def fsa_dicionario():
+    """Dicionário de dados: descrição, fonte, cobertura e RESSALVAS por coluna.
+
+    É a camada de 'asteriscos' — as ressalvas viajam junto com o dado.
+    """
+    _exige_fsa()
+    return envelope(fsa.dicionario(), proveniencia=fsa.proveniencia_base())
+
+
+@app.get("/api/fsa/consulta/{nome}")
+def fsa_consulta(nome: str, limite: int = 50, pagina: int = 1):
+    """Consulta uma tabela/visão estável da FSA. Cada resposta anexa as
+    ressalvas das colunas retornadas: impossível citar um número sem seu asterisco.
+    """
+    _exige_fsa()
+    try:
+        res = fsa.consultar(nome, limite=limite, pagina=pagina)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    prov = dict(fsa.proveniencia_base())
+    prov["motor_leitura"] = res["motor_leitura"]
+    prov["ressalvas"] = res["ressalvas"]  # asteriscos das colunas desta consulta
+    return envelope(
+        {"nome": nome, "colunas": res["colunas"], "linhas": res["linhas"]},
+        proveniencia=prov,
+        avisos=[f"página {pagina} · {len(res['linhas'])} linhas · dado NATIVO da FSA, não reconciliado"],
+    )
+
+
+@app.post("/api/fsa/registrar")
+def fsa_registrar():
+    """Registra a FSA como snapshot imutável da Sonda (idempotente por fixity)."""
+    _exige_fsa()
+    return envelope(fsa.registrar_snapshot(), proveniencia=fsa.proveniencia_base())
 
 
 # ── cruzamentos: a receita persistente (decisão 5) ───────────────────────────

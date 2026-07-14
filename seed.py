@@ -84,6 +84,15 @@ def main() -> None:
         )
         print("[seed] cruzamento de base faltante criado (contrato gerativo).")
 
+        # ── base FSA (dataset de segunda ordem) registrada como snapshot ──
+        from sonda import fsa
+        if fsa.disponivel():
+            r = fsa.registrar_snapshot(conn=conn)
+            print(f"[seed] FSA registrada: snapshot={r['snapshot_id']} "
+                  f"(novo={r['novo']}) fixity={r['fixity'][:16]}…")
+        else:
+            print("[seed] FSA ausente (data/fsa.db) — pulando registro.")
+
     # Executa o cruzamento real 2× via API interna → 2 pontos de série temporal.
     from sonda.api import executar_cruzamento  # import tardio: usa conexões próprias
 

@@ -52,6 +52,26 @@ hipótese (`?`). Ver `engine.contrato_base_faltante`.
 | `SondaApp.jsx` · `sonda_api_client.js` | frontend e cliente para a API real |
 | `seed.py` · `fixtures/` | popula o protótipo (fac-símiles offline) |
 
+## Base FSA (dataset de segunda ordem)
+
+`data/fsa.db` é uma base de pesquisa madura sobre o **Fundo Setorial do
+Audiovisual** (ANCINE): fatos, dimensões, visões analíticas estáveis e uma
+camada de proveniência/ressalvas embutida (`meta_tabela`, `meta_coluna`). Entra
+na Sonda como **base de primeira classe** ao lado do Mapa Cultural — **sem** ser
+fundida a um vocabulário comum (decisão 3). O motor DuckDB a lê **in-place**
+(`sqlite_scanner`; fallback `sqlite3` offline), sem reformatar o nativo.
+
+| Endpoint | O que devolve |
+|---|---|
+| `GET /api/fsa/tabelas` | inventário das tabelas/visões, na ontologia própria |
+| `GET /api/fsa/dicionario` | descrição, fonte, cobertura e **ressalvas por coluna** |
+| `GET /api/fsa/consulta/{nome}` | uma tabela/visão estável, **com as ressalvas das colunas anexadas** |
+| `POST /api/fsa/registrar` | registra a FSA como snapshot imutável (idempotente por fixity) |
+
+Princípio encarnado: **impossível citar um número sem ver seu asterisco** — cada
+consulta devolve as ressalvas metodológicas das colunas retornadas. Docs da base:
+`docs/DOCUMENTACAO_MIGRACAO_SONDA.md`, `docs/MAPA_CRUZAMENTOS_SONDA.md`.
+
 ## Como rodar
 
 ```bash

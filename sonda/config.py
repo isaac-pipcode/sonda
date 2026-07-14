@@ -16,6 +16,8 @@ class Config:
     regime_retencao_default: str = "a definir pela prática"
     # pool de conexões — importa para Postgres gerenciado que escala (Neon/Supabase).
     pool_max: int = 10
+    # base FSA (SQLite de segunda ordem) lida in-place pelo motor DuckDB.
+    fsa_db_path: str = "data/fsa.db"
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -26,6 +28,7 @@ class Config:
                 "postgresql://sonda:sonda@localhost:5432/sonda",
             ),
             pool_max=int(os.environ.get("SONDA_POOL_MAX", "10")),
+            fsa_db_path=os.environ.get("SONDA_FSA_DB", "data/fsa.db"),
         )
 
 
