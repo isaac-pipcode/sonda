@@ -74,6 +74,40 @@ CREATE TABLE IF NOT EXISTS execucao (
 );
 CREATE INDEX IF NOT EXISTS idx_execucao_cruz ON execucao (cruzamento_id, data);
 
+-- ───────────────────────────────────────────────────────────────────────────
+-- percurso: a REDE DE CAMINHOS (Documento 02). O objeto não é a junção A×B, é o
+-- traversal multi-salto: cadeia de nós (entidades) e arestas (articulações),
+-- possivelmente entre bases distintas. Como o cruzamento, persiste-se a RECEITA
+-- (a definição), não o resultado (decisão 5).
+--   definicao (JSONB): { nos:[{id,rotulo,tipo,fonte?,derivacao?,base_faltante?}],
+--                        arestas:[{de,para,tipo?,eixo?,regra?}] }
+--   tipo do nó/aresta: 'factual' | 'derivado' | 'ausente'
+-- ───────────────────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS percurso (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    nome         TEXT NOT NULL,
+    autor        TEXT NOT NULL,
+    versao_regra TEXT NOT NULL DEFAULT 'v1',
+    definicao    JSONB NOT NULL,
+    derivado_de  UUID REFERENCES percurso (id),   -- bifurcação do percurso
+    criado_em    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- execucao_percurso: série temporal do percurso (decisão 6). Cada travessia é um
+-- evento datado imutável, com o resultado POR ARESTA (achados, órfãos, contratos
+-- de base faltante). NÃO materializa tabela de resultado como verdade.
+CREATE TABLE IF NOT EXISTS execucao_percurso (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    percurso_id    UUID NOT NULL REFERENCES percurso (id),
+    data           TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ligados_total  INTEGER NOT NULL,
+    orfaos_total   INTEGER NOT NULL,
+    elos_ausentes  INTEGER NOT NULL,
+    saltos         JSONB NOT NULL,   -- resultado por aresta (achados como dado)
+    proveniencia   JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_execpercurso ON execucao_percurso (percurso_id, data);
+
 -- ── Gatilhos de imutabilidade (append-only) ────────────────────────────────
 CREATE OR REPLACE FUNCTION sonda_recusa_mutacao() RETURNS trigger AS $$
 BEGIN
@@ -89,4 +123,9 @@ CREATE TRIGGER snapshot_imutavel
 DROP TRIGGER IF EXISTS execucao_imutavel ON execucao;
 CREATE TRIGGER execucao_imutavel
     BEFORE UPDATE OR DELETE ON execucao
+    FOR EACH ROW EXECUTE FUNCTION sonda_recusa_mutacao();
+
+DROP TRIGGER IF EXISTS execpercurso_imutavel ON execucao_percurso;
+CREATE TRIGGER execpercurso_imutavel
+    BEFORE UPDATE OR DELETE ON execucao_percurso
     FOR EACH ROW EXECUTE FUNCTION sonda_recusa_mutacao();

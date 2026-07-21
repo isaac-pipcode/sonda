@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
-from . import engine, fsa
+from . import engine, fsa, percurso as percurso_mod
 from .db import connect, init_schema
 from .provenance import agora_utc, envelope, fixity
 
@@ -77,7 +77,7 @@ def raiz():
             "servico": "SONDA",
             "lema": "Carbono ancora. Sinal interfere. Sonar lê.",
             "recursos": ["/api/catalogo", "/api/raw/{base}", "/api/snapshots",
-                         "/api/cruzamentos", "/api/fsa/tabelas",
+                         "/api/cruzamentos", "/api/percursos", "/api/fsa/tabelas",
                          "/api/fsa/dicionario", "/api/fsa/consulta/{nome}"],
         },
         proveniencia={"fonte": "sonda", "nota": "infraestrutura, não fonte primária"},
@@ -429,4 +429,131 @@ def bifurcar(cid: str, r: ReceitaIn):
     return envelope(
         {"id": str(row["id"]), "derivado_de": cid, "nome": r.nome, "receita": receita},
         proveniencia={"fonte": "sonda", "nota": "fork: linhagem preservada (decisão 5)"},
+    )
+
+
+# ── percurso: a rede de caminhos (Documento 02) ──────────────────────────────
+class PercursoIn(BaseModel):
+    nome: str
+    autor: str
+    # definicao: { nos:[{id,rotulo,tipo,fonte?,derivacao?,base_faltante?}],
+    #             arestas:[{de,para,tipo?,eixo?,regra?}] }
+    definicao: dict
+    versao_regra: str = "v1"
+
+
+def _carga_no(conn, no: dict) -> list[dict]:
+    """Resolve a carga nativa de um nó, agnóstico à fonte (incomensurabilidade):
+    snapshot no Postgres OU uma visão/tabela da FSA (SQLite via DuckDB).
+    Nós derivado/ausente não têm fonte → carga vazia.
+    """
+    f = no.get("fonte")
+    if not f:
+        return []
+    if f.get("tipo") == "fsa":
+        return fsa.consultar(f["nome"], limite=f.get("limite", 500))["linhas"]
+    return _carga_do_snapshot(conn, f["snapshot_id"])
+
+
+@app.post("/api/percursos")
+def criar_percurso(p: PercursoIn):
+    with connect() as conn:
+        row = conn.execute(
+            """INSERT INTO percurso (nome, autor, versao_regra, definicao)
+               VALUES (%s, %s, %s, %s) RETURNING id""",
+            (p.nome, p.autor, p.versao_regra, Jsonb(p.definicao)),
+        ).fetchone()
+    return envelope(
+        {"id": str(row["id"]), "nome": p.nome, "definicao": p.definicao},
+        proveniencia={"fonte": "sonda", "nota": "persiste-se a DEFINIÇÃO do percurso, não o resultado (decisão 5)"},
+    )
+
+
+@app.get("/api/percursos")
+def listar_percursos():
+    with connect() as conn:
+        rows = conn.execute(
+            """SELECT p.id, p.nome, p.autor, p.versao_regra, p.derivado_de,
+                      COUNT(e.id) AS execucoes
+               FROM percurso p LEFT JOIN execucao_percurso e ON e.percurso_id = p.id
+               GROUP BY p.id ORDER BY p.criado_em"""
+        ).fetchall()
+    dados = [
+        {"id": str(r["id"]), "nome": r["nome"], "autor": r["autor"],
+         "versao_regra": r["versao_regra"],
+         "derivado_de": str(r["derivado_de"]) if r["derivado_de"] else None,
+         "execucoes": r["execucoes"]}
+        for r in rows
+    ]
+    return envelope(dados, proveniencia={"fonte": "sonda"})
+
+
+@app.get("/api/percursos/{pid}")
+def obter_percurso(pid: str):
+    with connect() as conn:
+        p = conn.execute("SELECT * FROM percurso WHERE id = %s", (pid,)).fetchone()
+        if not p:
+            raise HTTPException(404, "percurso não encontrado")
+        serie = conn.execute(
+            """SELECT data, ligados_total, orfaos_total, elos_ausentes
+               FROM execucao_percurso WHERE percurso_id = %s ORDER BY data""",
+            (pid,),
+        ).fetchall()
+    return envelope(
+        {
+            "id": str(p["id"]), "nome": p["nome"], "autor": p["autor"],
+            "versao_regra": p["versao_regra"], "definicao": p["definicao"],
+            "derivado_de": str(p["derivado_de"]) if p["derivado_de"] else None,
+            "serie": [
+                {"data": str(s["data"]), "ligados_total": s["ligados_total"],
+                 "orfaos_total": s["orfaos_total"], "elos_ausentes": s["elos_ausentes"]}
+                for s in serie
+            ],
+        },
+        proveniencia={"fonte": "sonda", "nota": "definição + série temporal de travessias"},
+    )
+
+
+@app.post("/api/percursos/{pid}/executar")
+def executar_percurso(pid: str):
+    """Executa a travessia sob demanda e grava um EVENTO datado (série temporal)."""
+    with connect() as conn:
+        p = conn.execute("SELECT * FROM percurso WHERE id = %s", (pid,)).fetchone()
+        if not p:
+            raise HTTPException(404, "percurso não encontrado")
+        definicao = p["definicao"]
+
+        # resolve a carga de cada nó (snapshot ou FSA), sob demanda.
+        cargas = {no["id"]: _carga_no(conn, no) for no in definicao.get("nos", [])}
+        resultado = percurso_mod.executar_percurso(definicao, cargas)
+        resumo = resultado["resumo"]
+
+        # proveniência: fontes por nó + saneamentos acumulados das arestas factuais.
+        fontes = []
+        for no in definicao.get("nos", []):
+            f = no.get("fonte") or {}
+            if f:
+                fontes.append({"no": no["id"], **{k: f[k] for k in f}})
+        saneamentos = sorted({s for salto in resultado["saltos"]
+                              for s in salto.get("saneamento", [])})
+        prov = {"fonte": "sonda", "eixos": [a.get("eixo") for a in definicao.get("arestas", [])],
+                "fontes_por_no": fontes, "saneamento": saneamentos,
+                "executado_em": agora_utc()}
+        prov["fixity_saltos"] = fixity(resultado["saltos"])
+
+        ev = conn.execute(
+            """INSERT INTO execucao_percurso
+                 (percurso_id, ligados_total, orfaos_total, elos_ausentes, saltos, proveniencia)
+               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id, data""",
+            (pid, resumo["ligados_total"], resumo["orfaos_total"], resumo["n_elos_ausentes"],
+             Jsonb(resultado["saltos"]), Jsonb(prov)),
+        ).fetchone()
+
+    return envelope(
+        {
+            "execucao_id": str(ev["id"]), "data": str(ev["data"]),
+            "resumo": resumo,
+            "saltos": resultado["saltos"],  # cada aresta: factual/derivado/ausente, com achados
+        },
+        proveniencia=prov,
     )

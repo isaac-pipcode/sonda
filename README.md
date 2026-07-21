@@ -39,12 +39,21 @@ A **Sonda generativa**: um cruzamento com `direita: null` devolve o *contrato de
 base faltante* — com a **pergunta de pesquisa no topo** e o eixo de ligação como
 hipótese (`?`). Ver `engine.contrato_base_faltante`.
 
+A **rede de caminhos** (Documento 02): a análise não é a junção A×B, é um
+**percurso multi-salto** — cadeia de nós (entidades) e arestas (articulações),
+possivelmente entre bases distintas. Cada aresta é `factual` (articulação real,
+executada pelo motor), `derivado` (dado inferido, ex.: preço = renda÷público) ou
+`ausente` (o elo que nenhuma base fecha → contrato de base faltante). O percurso
+é objeto persistente (irmão do cruzamento) e sua execução é série temporal
+append-only. Ver `sonda/percurso.py` e `/api/percursos`.
+
 ## Componentes
 
 | Arquivo | Papel |
 |---|---|
 | `sonda/api.py` | FastAPI: catálogo, raw, snapshots, cruzamentos, execução, fork |
 | `sonda/engine.py` | motor DuckDB de cruzamento (junção, órfãos, contrato gerativo) |
+| `sonda/percurso.py` | motor de travessia multi-salto (rede de caminhos, Documento 02) |
 | `sonda/ingest.py` | envelope coletado → snapshot imutável + raw_record |
 | `sonda/db.py` · `schema.sql` | Postgres, esquema, gatilhos append-only |
 | `sonda/provenance.py` | envelope de proveniência + fixity |
