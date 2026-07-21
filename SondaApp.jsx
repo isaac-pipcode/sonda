@@ -148,132 +148,191 @@ function Catalogo() {
   );
 }
 
-// ============ VISÃO 2: PERCURSO (rede generativa) ============
-const NOS = {
-  filme:      { t: "Agentes cinema", s: "Mapa Cultural", tipo: "factual", base: "mapa_cultural", x: 30, y: 60, w: 150, h: 54 },
-  salas:      { t: "Salas", s: "OCA", tipo: "factual", base: "oca", x: 280, y: 60, w: 150, h: 54 },
-  territorio: { t: "Território", s: "município", tipo: "factual", base: "oca", x: 280, y: 165, w: 150, h: 54 },
-  publico:    { t: "Público", s: "ingressos", tipo: "factual", base: "oca", x: 60, y: 220, w: 150, h: 54 },
-  preco:      { t: "Preço médio", s: "renda ÷ público", tipo: "derivado", base: "—", x: 470, y: 220, w: 160, h: 54 },
-  origem:     { t: "Origem do público", s: "elo ausente", tipo: "ausente", base: "—", x: 60, y: 330, w: 175, h: 56 },
+// ============ VISÃO 2: PERCURSO (rede de caminhos — lida do backend) ============
+// Layout por id de nó; a estrutura (nós/arestas) e os achados vêm da API.
+const LAYOUT = {
+  filme:  { x: 40,  y: 60,  w: 170, h: 54 },
+  salas:  { x: 320, y: 60,  w: 160, h: 54 },
+  preco:  { x: 470, y: 210, w: 170, h: 54 },
+  origem: { x: 60,  y: 300, w: 190, h: 56 },
 };
-const ARESTAS = [
-  ["filme", "salas", "factual"], ["salas", "territorio", "factual"],
-  ["salas", "publico", "factual"], ["publico", "preco", "derivado"],
-  ["publico", "origem", "ausente"],
-];
-function corTipo(t) { return t === "derivado" ? S.sonar : S.sinal; }
+const _fallbackLayout = (i) => ({ x: 40 + (i % 3) * 220, y: 60 + Math.floor(i / 3) * 110, w: 175, h: 54 });
+const corTipo = (t) => (t === "derivado" ? S.sonar : S.sinal);
 
 function Percurso() {
   const [sel, setSel] = useState(null);
-  const c = (k) => ({ x: NOS[k].x + NOS[k].w / 2, y: NOS[k].y + NOS[k].h / 2 });
+  const [ocupado, setOcupado] = useState(false);
+
+  const { env: lista } = useEnvelope(() => SondaAPI.percursos());
+  const pid = lista?.dados?.[0]?.id;
+  const { env: det, erro: erroDet, carregando: carDet } = useEnvelope(
+    () => (pid ? SondaAPI.percurso(pid) : null), [pid]);
+  const { env: ult, carregando: carUlt, recarregar } = useEnvelope(
+    () => (pid ? SondaAPI.percursoUltima(pid) : null), [pid]);
+
+  const definicao = det?.dados?.definicao;
+  const saltos = ult?.dados?.saltos || [];
+  const resumo = ult?.dados?.resumo;
+  const saltoDe = (de, para) => saltos.find((s) => s.de === de && s.para === para);
+
+  const reexecutar = async () => {
+    if (!pid) return;
+    setOcupado(true);
+    try { await SondaAPI.executarPercurso(pid); recarregar(); }
+    finally { setOcupado(false); }
+  };
+
+  const nos = definicao?.nos || [];
+  const pos = {}; nos.forEach((n, i) => { pos[n.id] = { ...(LAYOUT[n.id] || _fallbackLayout(i)), ...n }; });
+  const centro = (id) => ({ x: pos[id].x + pos[id].w / 2, y: pos[id].y + pos[id].h / 2 });
+
   return (
     <div>
-      <Lead n="02" titulo="Percurso" sub="O caminho do dado é o objeto. Clique no elo tracejado: a ausência é um gerador." />
-      <div style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 18, marginTop: 20, alignItems: "start" }}>
-        <div style={{ background: S.carbonoSoft, border: `1px solid ${S.carbonoLine}`, borderRadius: 8, padding: 6 }}>
-          <svg viewBox="0 0 680 410" style={{ width: "100%", height: "auto" }}>
-            <defs>
-              <marker id="au" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                <path d="M2 2 L8 5 L2 8" fill="none" stroke="context-stroke" strokeWidth="1.6" />
-              </marker>
-            </defs>
-            <line x1="50" y1="20" x2="50" y2="396" stroke={S.sedimento} strokeWidth="1.2" strokeDasharray="3 5" opacity="0.4" />
-            {ARESTAS.map(([de, pa, tipo], i) => {
-              const e1 = c(de), e2 = c(pa); const col = corTipo(tipo);
-              const on = sel === `e${i}`;
-              return (
-                <g key={i} onClick={() => setSel(pa === "origem" ? "origem" : `e${i}`)} style={{ cursor: "pointer" }}>
-                  <line x1={e1.x} y1={e1.y} x2={e2.x} y2={e2.y} stroke="transparent" strokeWidth="16" />
-                  <line x1={e1.x} y1={e1.y} x2={e2.x} y2={e2.y} stroke={col} strokeWidth={on ? 3.5 : 2}
-                    strokeDasharray={tipo === "ausente" ? "6 5" : "0"} markerEnd="url(#au)" opacity={on ? 1 : 0.7} />
-                </g>
-              );
-            })}
-            {Object.entries(NOS).map(([k, n]) => {
-              const col = n.tipo === "derivado" ? S.sonar : S.sinal;
-              const on = sel === k;
-              return (
-                <g key={k} onClick={() => setSel(k)} style={{ cursor: "pointer" }}>
-                  <rect x={n.x} y={n.y} width={n.w} height={n.h} rx={7}
-                    fill={on ? col : S.carbono} stroke={col}
-                    strokeWidth={n.tipo === "ausente" ? 1.5 : on ? 2 : 1}
-                    strokeDasharray={n.tipo === "ausente" ? "6 5" : "0"} />
-                  <text x={n.x + n.w / 2} y={n.y + n.h / 2 - 5} textAnchor="middle" fontSize="13" fontWeight="700"
-                    fill={on ? S.carbono : S.osso} fontFamily="'Archivo',sans-serif">{n.t}</text>
-                  <text x={n.x + n.w / 2} y={n.y + n.h / 2 + 12} textAnchor="middle" fontSize="10"
-                    fill={on ? S.carbono : S.sedimentoSoft} fontFamily="'IBM Plex Mono',monospace">{n.s}</text>
-                </g>
-              );
-            })}
-          </svg>
-        </div>
-        <PainelPercurso sel={sel} />
+      <Lead n="02" titulo="Percurso" sub="O caminho do dado é o objeto — travessia multi-salto lida do backend. Clique no elo tracejado: a ausência é um gerador." />
+
+      <div style={{ display: "flex", gap: 10, alignItems: "center", margin: "16px 0 4px", flexWrap: "wrap" }}>
+        <Botao cor={S.sinal} onClick={reexecutar} ocupado={ocupado}>▶ re-executar travessia</Botao>
+        {resumo && (
+          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, color: S.sedimentoSoft }}>
+            <span style={{ color: S.sonar }}>{resumo.ligados_total} ligados</span> ·{" "}
+            <span style={{ color: S.sinal }}>{resumo.orfaos_total} órfãos</span> ·{" "}
+            <span style={{ color: S.sinal }}>{resumo.n_elos_ausentes} elo(s) ausente(s)</span> ·{" "}
+            {resumo.n_derivados} derivado(s)
+          </span>
+        )}
       </div>
+
+      <Estado carregando={carDet || carUlt} erro={erroDet} vazio={!definicao}>
+        <div style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 18, marginTop: 12, alignItems: "start" }}>
+          <div style={{ background: S.carbonoSoft, border: `1px solid ${S.carbonoLine}`, borderRadius: 8, padding: 6 }}>
+            <svg viewBox="0 0 680 410" style={{ width: "100%", height: "auto" }}>
+              <defs>
+                <marker id="au" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M2 2 L8 5 L2 8" fill="none" stroke="context-stroke" strokeWidth="1.6" />
+                </marker>
+              </defs>
+              <line x1="24" y1="20" x2="24" y2="396" stroke={S.sedimento} strokeWidth="1.2" strokeDasharray="3 5" opacity="0.4" />
+              {(definicao?.arestas || []).map((a, i) => {
+                if (!pos[a.de] || !pos[a.para]) return null;
+                const e1 = centro(a.de), e2 = centro(a.para);
+                const s = saltoDe(a.de, a.para);
+                const tipo = s?.tipo || a.tipo || "factual";
+                const col = corTipo(tipo);
+                const on = sel === `e${i}`;
+                const mx = (e1.x + e2.x) / 2, my = (e1.y + e2.y) / 2;
+                return (
+                  <g key={i} onClick={() => setSel(tipo === "ausente" ? a.para : `e${i}`)} style={{ cursor: "pointer" }}>
+                    <line x1={e1.x} y1={e1.y} x2={e2.x} y2={e2.y} stroke="transparent" strokeWidth="16" />
+                    <line x1={e1.x} y1={e1.y} x2={e2.x} y2={e2.y} stroke={col} strokeWidth={on ? 3.5 : 2}
+                      strokeDasharray={tipo === "ausente" ? "6 5" : "0"} markerEnd="url(#au)" opacity={on ? 1 : 0.7} />
+                    {tipo === "factual" && s && (
+                      <text x={mx} y={my - 6} textAnchor="middle" fontSize="10" fill={S.sonar} fontFamily="'IBM Plex Mono',monospace">
+                        {s.ligados} ligados
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+              {nos.map((no) => {
+                const p = pos[no.id];
+                const col = no.tipo === "derivado" ? S.sonar : S.sinal;
+                const on = sel === no.id;
+                return (
+                  <g key={no.id} onClick={() => setSel(no.id)} style={{ cursor: "pointer" }}>
+                    <rect x={p.x} y={p.y} width={p.w} height={p.h} rx={7}
+                      fill={on ? col : S.carbono} stroke={col}
+                      strokeWidth={no.tipo === "ausente" ? 1.5 : on ? 2 : 1}
+                      strokeDasharray={no.tipo === "ausente" ? "6 5" : "0"} />
+                    <text x={p.x + p.w / 2} y={p.y + p.h / 2 - 5} textAnchor="middle" fontSize="13" fontWeight="700"
+                      fill={on ? S.carbono : S.osso} fontFamily="'Archivo',sans-serif">{no.rotulo}</text>
+                    <text x={p.x + p.w / 2} y={p.y + p.h / 2 + 12} textAnchor="middle" fontSize="10"
+                      fill={on ? S.carbono : S.sedimentoSoft} fontFamily="'IBM Plex Mono',monospace">{no.tipo}</text>
+                  </g>
+                );
+              })}
+            </svg>
+          </div>
+          <PainelPercurso sel={sel} nos={pos} saltos={saltos} arestas={definicao?.arestas || []} />
+        </div>
+      </Estado>
     </div>
   );
 }
 
-function PainelPercurso({ sel }) {
-  const ehAusente = sel === "origem";
-  // o contrato real vem da API: executa o cruzamento de base faltante.
-  const { env, erro, carregando } = useEnvelope(async () => {
-    if (!ehAusente) return null;
-    const lista = await SondaAPI.cruzamentos();
-    const cAusente = (lista.dados || []).find((x) => /faltante/i.test(x.nome));
-    if (!cAusente) return null;
-    return SondaAPI.executar(cAusente.id);
-  }, [ehAusente]);
-
-  if (ehAusente) {
-    const contrato = env?.dados?.achados?.contrato;
+function PainelPercurso({ sel, nos, saltos, arestas }) {
+  // seleção de um nó ausente → contrato real (do salto ausente da travessia).
+  const noSel = sel && nos[sel];
+  if (noSel && noSel.tipo === "ausente") {
+    const salto = saltos.find((s) => s.para === sel && s.tipo === "ausente");
+    const contrato = salto?.contrato;
     return (
       <div style={{ background: S.carbonoSoft, border: `1.5px dashed ${S.sinal}`, borderRadius: 8, padding: "18px 18px" }}>
         <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, fontWeight: 700, color: S.sinal, letterSpacing: ".05em" }}>
           ⚠ ELO AUSENTE · CONTRATO DE BASE FALTANTE
         </div>
-        <Estado carregando={carregando} erro={erro} vazio={!contrato}>
-          {contrato && (
-            <>
-              {/* o coração: a PERGUNTA de pesquisa, no topo */}
-              <div style={{ marginTop: 14, padding: "13px 14px", background: "rgba(255,61,46,.06)", borderLeft: `3px solid ${S.sinal}`, borderRadius: 3 }}>
-                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: S.sinal, fontWeight: 700, marginBottom: 6 }}>PERGUNTA DE PESQUISA</div>
-                <div style={{ fontSize: 14.5, fontStyle: "italic", color: S.osso, lineHeight: 1.5, fontFamily: "'Newsreader',serif" }}>
-                  {contrato.pergunta_de_pesquisa}
-                </div>
+        {!contrato && <Mono cor={S.sedimentoSoft}>execute a travessia para gerar o contrato</Mono>}
+        {contrato && (
+          <>
+            <div style={{ marginTop: 14, padding: "13px 14px", background: "rgba(255,61,46,.06)", borderLeft: `3px solid ${S.sinal}`, borderRadius: 3 }}>
+              <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: S.sinal, fontWeight: 700, marginBottom: 6 }}>PERGUNTA DE PESQUISA</div>
+              <div style={{ fontSize: 14.5, fontStyle: "italic", color: S.osso, lineHeight: 1.5, fontFamily: "'Newsreader',serif" }}>
+                {contrato.pergunta_de_pesquisa}
               </div>
-              {/* o eixo é hipótese a confirmar, abaixo, com '?' */}
-              <div style={{ marginTop: 12, fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: S.sedimento, fontWeight: 700 }}>
-                EIXO DE LIGAÇÃO ({contrato.eixo_de_ligacao_hipotese?.eixo}) — hipótese a confirmar
+            </div>
+            <div style={{ marginTop: 12, fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: S.sedimento, fontWeight: 700 }}>
+              EIXO DE LIGAÇÃO ({contrato.eixo_de_ligacao_hipotese?.eixo}) — hipótese a confirmar
+            </div>
+            {(contrato.eixo_de_ligacao_hipotese?.hipoteses || []).map((h, i) => (
+              <div key={i} style={{ fontSize: 12, color: S.sedimentoSoft, fontFamily: "'IBM Plex Mono',monospace", padding: "4px 0" }}>
+                <span style={{ color: S.sinal }}>?</span> {h}
               </div>
-              {(contrato.eixo_de_ligacao_hipotese?.hipoteses || []).map((h, i) => (
-                <div key={i} style={{ fontSize: 12, color: S.sedimentoSoft, fontFamily: "'IBM Plex Mono',monospace", padding: "4px 0" }}>
-                  <span style={{ color: S.sinal }}>?</span> {h}
-                </div>
-              ))}
-              <div style={{ marginTop: 10, fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: S.sedimento }}>
-                retenção: {contrato.regime_retencao}
-              </div>
-            </>
-          )}
-        </Estado>
+            ))}
+            <div style={{ marginTop: 10, fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: S.sedimento }}>
+              retenção: {contrato.regime_retencao}
+            </div>
+          </>
+        )}
       </div>
     );
   }
 
-  const n = sel && NOS[sel] && !sel.startsWith("e") ? NOS[sel] : null;
+  // seleção de aresta factual → métricas reais + amostra de órfãos (achado).
+  let salto = null;
+  if (typeof sel === "string" && sel.startsWith("e")) {
+    const a = arestas[Number(sel.slice(1))];
+    if (a) salto = saltos.find((s) => s.de === a.de && s.para === a.para);
+  }
   return (
     <div style={{ background: S.carbonoSoft, border: `1px solid ${S.carbonoLine}`, borderRadius: 8, padding: "18px 18px", minHeight: 120 }}>
-      {!n && <div style={{ color: S.sedimentoSoft, fontStyle: "italic", fontSize: 13.5, fontFamily: "'Newsreader',serif" }}>Selecione um nó ou aresta para inspecionar a proveniência. O elo tracejado abre o contrato da base faltante.</div>}
-      {n && (
+      {!noSel && !salto && <div style={{ color: S.sedimentoSoft, fontStyle: "italic", fontSize: 13.5, fontFamily: "'Newsreader',serif" }}>Selecione um nó ou aresta para inspecionar a articulação. O elo tracejado abre o contrato da base faltante.</div>}
+      {noSel && noSel.tipo !== "ausente" && (
         <div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: S.osso, fontFamily: "'Archivo',sans-serif" }}>{n.t}</div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: S.osso, fontFamily: "'Archivo',sans-serif" }}>{noSel.rotulo}</div>
           <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: S.sedimentoSoft, marginTop: 3 }}>
-            {n.tipo === "derivado" ? "nó derivado · não é dado primário" : `nó factual · base ${n.base}`}
+            {noSel.tipo === "derivado" ? "nó derivado · não é dado primário" : "nó factual · registro nativo"}
           </div>
-          <div style={{ marginTop: 12, padding: "10px 12px", background: S.carbono, borderRadius: 4, fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, color: S.sedimentoSoft }}>
-            ↳ {n.tipo === "derivado" ? "preço = renda / público (mesma sessão)" : `proveniência: registro nativo de ${n.base}`}
+          {noSel.derivacao && (
+            <div style={{ marginTop: 12, padding: "10px 12px", background: S.carbono, borderRadius: 4, fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, color: S.sedimentoSoft }}>
+              ↳ {noSel.derivacao}
+            </div>
+          )}
+        </div>
+      )}
+      {salto && salto.tipo === "factual" && (
+        <div>
+          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: S.osso }}>
+            {salto.rotulo_de} → {salto.rotulo_para} · eixo {salto.eixo}
           </div>
+          <div style={{ marginTop: 8, fontFamily: "'IBM Plex Mono',monospace", fontSize: 12 }}>
+            <span style={{ color: S.sonar }}>{salto.ligados} ligados</span> ·{" "}
+            <span style={{ color: S.sinal }}>{salto.orfaos_esquerda + salto.orfaos_direita} órfãos</span>
+            <span style={{ color: S.sedimento }}> (achado, não escondido)</span>
+          </div>
+          {(salto.amostra_orfaos_esquerda || []).slice(0, 5).map((o, i) => (
+            <div key={i} style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: S.sedimentoSoft, paddingTop: 3 }}>
+              <span style={{ color: S.sinal }}>órfão</span> {o.rotulo}
+            </div>
+          ))}
         </div>
       )}
     </div>

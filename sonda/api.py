@@ -514,6 +514,35 @@ def obter_percurso(pid: str):
     )
 
 
+@app.get("/api/percursos/{pid}/ultima")
+def ultima_travessia(pid: str):
+    """Última travessia gravada (lê sem re-executar — para a interface exibir)."""
+    with connect() as conn:
+        p = conn.execute("SELECT id FROM percurso WHERE id = %s", (pid,)).fetchone()
+        if not p:
+            raise HTTPException(404, "percurso não encontrado")
+        ev = conn.execute(
+            """SELECT id, data, ligados_total, orfaos_total, elos_ausentes, saltos, proveniencia
+               FROM execucao_percurso WHERE percurso_id = %s ORDER BY data DESC LIMIT 1""",
+            (pid,),
+        ).fetchone()
+    if not ev:
+        return envelope(None, proveniencia={"fonte": "sonda"},
+                        avisos=["percurso ainda não executado — use POST /executar"])
+    saltos = ev["saltos"]
+    resumo = {
+        "ligados_total": ev["ligados_total"], "orfaos_total": ev["orfaos_total"],
+        "n_elos_ausentes": ev["elos_ausentes"],
+        "n_factuais": sum(1 for s in saltos if s["tipo"] == "factual"),
+        "n_derivados": sum(1 for s in saltos if s["tipo"] == "derivado"),
+        "n_saltos": len(saltos),
+    }
+    return envelope(
+        {"execucao_id": str(ev["id"]), "data": str(ev["data"]), "resumo": resumo, "saltos": saltos},
+        proveniencia=ev["proveniencia"],
+    )
+
+
 @app.post("/api/percursos/{pid}/executar")
 def executar_percurso(pid: str):
     """Executa a travessia sob demanda e grava um EVENTO datado (série temporal)."""
