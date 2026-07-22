@@ -35,4 +35,9 @@ export const SondaAPI = {
   executar: (id) => post(`/api/cruzamentos/${id}/executar`),
   criar: (receita) => post("/api/cruzamentos", receita),
   bifurcar: (id, receita) => post(`/api/cruzamentos/${id}/fork`, receita),
+  // rede de caminhos (percurso multi-salto)
+  percursos: () => get("/api/percursos"),
+  percurso: (id) => get(`/api/percursos/${id}`),
+  percursoUltima: (id) => get(`/api/percursos/${id}/ultima`),
+  executarPercurso: (id) => post(`/api/percursos/${id}/executar`),
 };

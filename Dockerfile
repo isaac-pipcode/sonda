@@ -8,10 +8,11 @@ WORKDIR /app
 COPY requirements-backend.txt .
 RUN pip install --no-cache-dir -r requirements-backend.txt
 
-# código do backend + esquema + fixtures/seed
+# código do backend + esquema + fixtures/seed + base FSA (lida in-place)
 COPY sonda/ ./sonda/
 COPY schema.sql seed.py ./
 COPY fixtures/ ./fixtures/
+COPY data/ ./data/
 
 ENV PYTHONUNBUFFERED=1
 # plataformas (Fly/Render/Railway) injetam PORT; default 8000.

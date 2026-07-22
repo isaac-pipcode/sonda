@@ -39,18 +39,47 @@ A **Sonda generativa**: um cruzamento com `direita: null` devolve o *contrato de
 base faltante* — com a **pergunta de pesquisa no topo** e o eixo de ligação como
 hipótese (`?`). Ver `engine.contrato_base_faltante`.
 
+A **rede de caminhos** (Documento 02): a análise não é a junção A×B, é um
+**percurso multi-salto** — cadeia de nós (entidades) e arestas (articulações),
+possivelmente entre bases distintas. Cada aresta é `factual` (articulação real,
+executada pelo motor), `derivado` (dado inferido, ex.: preço = renda÷público) ou
+`ausente` (o elo que nenhuma base fecha → contrato de base faltante). O percurso
+é objeto persistente (irmão do cruzamento) e sua execução é série temporal
+append-only. Ver `sonda/percurso.py` e `/api/percursos`.
+
 ## Componentes
 
 | Arquivo | Papel |
 |---|---|
 | `sonda/api.py` | FastAPI: catálogo, raw, snapshots, cruzamentos, execução, fork |
 | `sonda/engine.py` | motor DuckDB de cruzamento (junção, órfãos, contrato gerativo) |
+| `sonda/percurso.py` | motor de travessia multi-salto (rede de caminhos, Documento 02) |
 | `sonda/ingest.py` | envelope coletado → snapshot imutável + raw_record |
 | `sonda/db.py` · `schema.sql` | Postgres, esquema, gatilhos append-only |
 | `sonda/provenance.py` | envelope de proveniência + fixity |
 | `coleta_real_mapas.py` | coletor da API do Mapa Cultural (rodar em rede aberta) |
 | `SondaApp.jsx` · `sonda_api_client.js` | frontend e cliente para a API real |
 | `seed.py` · `fixtures/` | popula o protótipo (fac-símiles offline) |
+
+## Base FSA (dataset de segunda ordem)
+
+`data/fsa.db` é uma base de pesquisa madura sobre o **Fundo Setorial do
+Audiovisual** (ANCINE): fatos, dimensões, visões analíticas estáveis e uma
+camada de proveniência/ressalvas embutida (`meta_tabela`, `meta_coluna`). Entra
+na Sonda como **base de primeira classe** ao lado do Mapa Cultural — **sem** ser
+fundida a um vocabulário comum (decisão 3). O motor DuckDB a lê **in-place**
+(`sqlite_scanner`; fallback `sqlite3` offline), sem reformatar o nativo.
+
+| Endpoint | O que devolve |
+|---|---|
+| `GET /api/fsa/tabelas` | inventário das tabelas/visões, na ontologia própria |
+| `GET /api/fsa/dicionario` | descrição, fonte, cobertura e **ressalvas por coluna** |
+| `GET /api/fsa/consulta/{nome}` | uma tabela/visão estável, **com as ressalvas das colunas anexadas** |
+| `POST /api/fsa/registrar` | registra a FSA como snapshot imutável (idempotente por fixity) |
+
+Princípio encarnado: **impossível citar um número sem ver seu asterisco** — cada
+consulta devolve as ressalvas metodológicas das colunas retornadas. Docs da base:
+`docs/DOCUMENTACAO_MIGRACAO_SONDA.md`, `docs/MAPA_CRUZAMENTOS_SONDA.md`.
 
 ## Como rodar
 
@@ -109,14 +138,26 @@ fly deploy
 fly ssh console -C "python seed.py"
 ```
 
-**3. Frontend** (Vercel): aponte o projeto para o diretório `web/` (Root
-Directory = `web`). A detecção de Vite + `web/vercel.json` cuidam do build.
+**3. Frontend** (Vercel): o jeito limpo é apontar o **Root Directory = `web`**
+nas configurações do projeto Vercel — assim a Vercel vê só o app Vite e nunca o
+`requirements.txt` da raiz (que dispararia o builder Python por engano).
+Como rede de segurança, há um `vercel.json` na raiz que força o build só do
+frontend (`framework: null`, build de `web/`), caso o Root Directory fique na raiz.
 Defina a variável de ambiente:
 ```
 VITE_SONDA_API = https://<seu-backend>.fly.dev
 ```
 
 Variáveis em `.env.example`. CORS já está liberado na API para o frontend.
+
+### Cron de ingestão
+
+`.github/workflows/coleta.yml` roda toda segunda (06:00 UTC) e por disparo
+manual: coleta do Mapa Cultural (`coleta_real_mapas.py`) e ingere como **novo
+snapshot datado** — append-only, o histórico só cresce (decisões 6 e 7). O JSON
+coletado é guardado como artefato (proveniência). Requer o segredo de
+repositório **`SONDA_DATABASE_URL`** (a mesma connection string pooled do banco
+gerenciado). Defina em *Settings → Secrets and variables → Actions*.
 
 ## Definição de pronto (README §9) — estado
 

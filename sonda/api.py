@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
-from . import engine
+from . import engine, fsa, percurso as percurso_mod
 from .db import connect, init_schema
 from .provenance import agora_utc, envelope, fixity
 
@@ -77,10 +77,22 @@ def raiz():
             "servico": "SONDA",
             "lema": "Carbono ancora. Sinal interfere. Sonar lê.",
             "recursos": ["/api/catalogo", "/api/raw/{base}", "/api/snapshots",
-                         "/api/cruzamentos"],
+                         "/api/cruzamentos", "/api/percursos", "/api/fsa/tabelas",
+                         "/api/fsa/dicionario", "/api/fsa/consulta/{nome}"],
         },
         proveniencia={"fonte": "sonda", "nota": "infraestrutura, não fonte primária"},
     )
+
+
+@app.get("/health")
+def health():
+    """Healthcheck para a plataforma (Fly/Render). Verifica o banco."""
+    try:
+        with connect() as conn:
+            conn.execute("SELECT 1")
+        return {"status": "ok", "banco": "ok", "servido_em": agora_utc()}
+    except Exception as e:
+        raise HTTPException(503, f"banco indisponível: {type(e).__name__}")
 
 
 # ── catálogo: as bases lado a lado, na língua própria (porosidade ontológica) ─
@@ -127,6 +139,22 @@ def catalogo():
         }
         for r in rows
     ]
+
+    # FSA entra como base de primeira classe, na língua própria (não fundida).
+    if fsa.disponivel():
+        inv = fsa.inventario()["itens"]
+        prov_fsa = fsa.proveniencia_base()  # calcula fixity uma vez
+        catalogo_dados.append({
+            "base": fsa.BASE,
+            "entidade_nativa": "base_relacional_fsa (fatos · dimensões · visões)",
+            "n_registros": sum(i["registros"] or 0 for i in inv),
+            "tabelas_e_visoes": len(inv),
+            "acesso": "/api/fsa/tabelas · /api/fsa/dicionario · /api/fsa/consulta/{nome}",
+        })
+        prov_por_base.setdefault(prov_fsa["fonte"], []).append(
+            {"instancia_versao": prov_fsa["instancia_versao"],
+             "entidade": "base_relacional_fsa", "fixity": prov_fsa["fixity"]}
+        )
     return envelope(
         catalogo_dados,
         proveniencia=[{"fonte": k, "snapshots": v} for k, v in prov_por_base.items()],
@@ -165,7 +193,9 @@ def snapshots():
     with connect() as conn:
         rows = conn.execute(
             """SELECT snapshot_id, fonte, instancia_versao, entidade, capturado_em,
-                      fixity, politica_retencao, jsonb_array_length(carga) AS n
+                      fixity, politica_retencao,
+                      CASE WHEN jsonb_typeof(carga) = 'array'
+                           THEN jsonb_array_length(carga) END AS n
                FROM snapshot ORDER BY capturado_em DESC"""
         ).fetchall()
     dados = [
@@ -182,6 +212,57 @@ def snapshots():
         for r in rows
     ]
     return envelope(dados, proveniencia={"fonte": "sonda", "nota": "instantâneos imutáveis (append-only)"})
+
+
+# ── base FSA: dataset de segunda ordem lido in-place (na língua própria) ──────
+def _exige_fsa():
+    if not fsa.disponivel():
+        raise HTTPException(404, "base FSA indisponível (defina SONDA_FSA_DB ou inclua data/fsa.db)")
+
+
+@app.get("/api/fsa/tabelas")
+def fsa_tabelas():
+    """Inventário das tabelas/visões da FSA — na ontologia própria da base."""
+    _exige_fsa()
+    inv = fsa.inventario()["itens"]
+    return envelope(inv, proveniencia=fsa.proveniencia_base())
+
+
+@app.get("/api/fsa/dicionario")
+def fsa_dicionario():
+    """Dicionário de dados: descrição, fonte, cobertura e RESSALVAS por coluna.
+
+    É a camada de 'asteriscos' — as ressalvas viajam junto com o dado.
+    """
+    _exige_fsa()
+    return envelope(fsa.dicionario(), proveniencia=fsa.proveniencia_base())
+
+
+@app.get("/api/fsa/consulta/{nome}")
+def fsa_consulta(nome: str, limite: int = 50, pagina: int = 1):
+    """Consulta uma tabela/visão estável da FSA. Cada resposta anexa as
+    ressalvas das colunas retornadas: impossível citar um número sem seu asterisco.
+    """
+    _exige_fsa()
+    try:
+        res = fsa.consultar(nome, limite=limite, pagina=pagina)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    prov = dict(fsa.proveniencia_base())
+    prov["motor_leitura"] = res["motor_leitura"]
+    prov["ressalvas"] = res["ressalvas"]  # asteriscos das colunas desta consulta
+    return envelope(
+        {"nome": nome, "colunas": res["colunas"], "linhas": res["linhas"]},
+        proveniencia=prov,
+        avisos=[f"página {pagina} · {len(res['linhas'])} linhas · dado NATIVO da FSA, não reconciliado"],
+    )
+
+
+@app.post("/api/fsa/registrar")
+def fsa_registrar():
+    """Registra a FSA como snapshot imutável da Sonda (idempotente por fixity)."""
+    _exige_fsa()
+    return envelope(fsa.registrar_snapshot(), proveniencia=fsa.proveniencia_base())
 
 
 # ── cruzamentos: a receita persistente (decisão 5) ───────────────────────────
@@ -348,4 +429,160 @@ def bifurcar(cid: str, r: ReceitaIn):
     return envelope(
         {"id": str(row["id"]), "derivado_de": cid, "nome": r.nome, "receita": receita},
         proveniencia={"fonte": "sonda", "nota": "fork: linhagem preservada (decisão 5)"},
+    )
+
+
+# ── percurso: a rede de caminhos (Documento 02) ──────────────────────────────
+class PercursoIn(BaseModel):
+    nome: str
+    autor: str
+    # definicao: { nos:[{id,rotulo,tipo,fonte?,derivacao?,base_faltante?}],
+    #             arestas:[{de,para,tipo?,eixo?,regra?}] }
+    definicao: dict
+    versao_regra: str = "v1"
+
+
+def _carga_no(conn, no: dict) -> list[dict]:
+    """Resolve a carga nativa de um nó, agnóstico à fonte (incomensurabilidade):
+    snapshot no Postgres OU uma visão/tabela da FSA (SQLite via DuckDB).
+    Nós derivado/ausente não têm fonte → carga vazia.
+    """
+    f = no.get("fonte")
+    if not f:
+        return []
+    if f.get("tipo") == "fsa":
+        return fsa.consultar(f["nome"], limite=f.get("limite", 500))["linhas"]
+    return _carga_do_snapshot(conn, f["snapshot_id"])
+
+
+@app.post("/api/percursos")
+def criar_percurso(p: PercursoIn):
+    with connect() as conn:
+        row = conn.execute(
+            """INSERT INTO percurso (nome, autor, versao_regra, definicao)
+               VALUES (%s, %s, %s, %s) RETURNING id""",
+            (p.nome, p.autor, p.versao_regra, Jsonb(p.definicao)),
+        ).fetchone()
+    return envelope(
+        {"id": str(row["id"]), "nome": p.nome, "definicao": p.definicao},
+        proveniencia={"fonte": "sonda", "nota": "persiste-se a DEFINIÇÃO do percurso, não o resultado (decisão 5)"},
+    )
+
+
+@app.get("/api/percursos")
+def listar_percursos():
+    with connect() as conn:
+        rows = conn.execute(
+            """SELECT p.id, p.nome, p.autor, p.versao_regra, p.derivado_de,
+                      COUNT(e.id) AS execucoes
+               FROM percurso p LEFT JOIN execucao_percurso e ON e.percurso_id = p.id
+               GROUP BY p.id ORDER BY p.criado_em"""
+        ).fetchall()
+    dados = [
+        {"id": str(r["id"]), "nome": r["nome"], "autor": r["autor"],
+         "versao_regra": r["versao_regra"],
+         "derivado_de": str(r["derivado_de"]) if r["derivado_de"] else None,
+         "execucoes": r["execucoes"]}
+        for r in rows
+    ]
+    return envelope(dados, proveniencia={"fonte": "sonda"})
+
+
+@app.get("/api/percursos/{pid}")
+def obter_percurso(pid: str):
+    with connect() as conn:
+        p = conn.execute("SELECT * FROM percurso WHERE id = %s", (pid,)).fetchone()
+        if not p:
+            raise HTTPException(404, "percurso não encontrado")
+        serie = conn.execute(
+            """SELECT data, ligados_total, orfaos_total, elos_ausentes
+               FROM execucao_percurso WHERE percurso_id = %s ORDER BY data""",
+            (pid,),
+        ).fetchall()
+    return envelope(
+        {
+            "id": str(p["id"]), "nome": p["nome"], "autor": p["autor"],
+            "versao_regra": p["versao_regra"], "definicao": p["definicao"],
+            "derivado_de": str(p["derivado_de"]) if p["derivado_de"] else None,
+            "serie": [
+                {"data": str(s["data"]), "ligados_total": s["ligados_total"],
+                 "orfaos_total": s["orfaos_total"], "elos_ausentes": s["elos_ausentes"]}
+                for s in serie
+            ],
+        },
+        proveniencia={"fonte": "sonda", "nota": "definição + série temporal de travessias"},
+    )
+
+
+@app.get("/api/percursos/{pid}/ultima")
+def ultima_travessia(pid: str):
+    """Última travessia gravada (lê sem re-executar — para a interface exibir)."""
+    with connect() as conn:
+        p = conn.execute("SELECT id FROM percurso WHERE id = %s", (pid,)).fetchone()
+        if not p:
+            raise HTTPException(404, "percurso não encontrado")
+        ev = conn.execute(
+            """SELECT id, data, ligados_total, orfaos_total, elos_ausentes, saltos, proveniencia
+               FROM execucao_percurso WHERE percurso_id = %s ORDER BY data DESC LIMIT 1""",
+            (pid,),
+        ).fetchone()
+    if not ev:
+        return envelope(None, proveniencia={"fonte": "sonda"},
+                        avisos=["percurso ainda não executado — use POST /executar"])
+    saltos = ev["saltos"]
+    resumo = {
+        "ligados_total": ev["ligados_total"], "orfaos_total": ev["orfaos_total"],
+        "n_elos_ausentes": ev["elos_ausentes"],
+        "n_factuais": sum(1 for s in saltos if s["tipo"] == "factual"),
+        "n_derivados": sum(1 for s in saltos if s["tipo"] == "derivado"),
+        "n_saltos": len(saltos),
+    }
+    return envelope(
+        {"execucao_id": str(ev["id"]), "data": str(ev["data"]), "resumo": resumo, "saltos": saltos},
+        proveniencia=ev["proveniencia"],
+    )
+
+
+@app.post("/api/percursos/{pid}/executar")
+def executar_percurso(pid: str):
+    """Executa a travessia sob demanda e grava um EVENTO datado (série temporal)."""
+    with connect() as conn:
+        p = conn.execute("SELECT * FROM percurso WHERE id = %s", (pid,)).fetchone()
+        if not p:
+            raise HTTPException(404, "percurso não encontrado")
+        definicao = p["definicao"]
+
+        # resolve a carga de cada nó (snapshot ou FSA), sob demanda.
+        cargas = {no["id"]: _carga_no(conn, no) for no in definicao.get("nos", [])}
+        resultado = percurso_mod.executar_percurso(definicao, cargas)
+        resumo = resultado["resumo"]
+
+        # proveniência: fontes por nó + saneamentos acumulados das arestas factuais.
+        fontes = []
+        for no in definicao.get("nos", []):
+            f = no.get("fonte") or {}
+            if f:
+                fontes.append({"no": no["id"], **{k: f[k] for k in f}})
+        saneamentos = sorted({s for salto in resultado["saltos"]
+                              for s in salto.get("saneamento", [])})
+        prov = {"fonte": "sonda", "eixos": [a.get("eixo") for a in definicao.get("arestas", [])],
+                "fontes_por_no": fontes, "saneamento": saneamentos,
+                "executado_em": agora_utc()}
+        prov["fixity_saltos"] = fixity(resultado["saltos"])
+
+        ev = conn.execute(
+            """INSERT INTO execucao_percurso
+                 (percurso_id, ligados_total, orfaos_total, elos_ausentes, saltos, proveniencia)
+               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id, data""",
+            (pid, resumo["ligados_total"], resumo["orfaos_total"], resumo["n_elos_ausentes"],
+             Jsonb(resultado["saltos"]), Jsonb(prov)),
+        ).fetchone()
+
+    return envelope(
+        {
+            "execucao_id": str(ev["id"]), "data": str(ev["data"]),
+            "resumo": resumo,
+            "saltos": resultado["saltos"],  # cada aresta: factual/derivado/ausente, com achados
+        },
+        proveniencia=prov,
     )

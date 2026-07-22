@@ -84,8 +84,49 @@ def main() -> None:
         )
         print("[seed] cruzamento de base faltante criado (contrato gerativo).")
 
+        # ── base FSA (dataset de segunda ordem) registrada como snapshot ──
+        from sonda import fsa
+        if fsa.disponivel():
+            r = fsa.registrar_snapshot(conn=conn)
+            print(f"[seed] FSA registrada: snapshot={r['snapshot_id']} "
+                  f"(novo={r['novo']}) fixity={r['fixity'][:16]}…")
+        else:
+            print("[seed] FSA ausente (data/fsa.db) — pulando registro.")
+
+        # ── PERCURSO (rede de caminhos): agentes → salas → preço → origem ──
+        # O mesmo percurso que a visão do front desenha, agora no backend:
+        # dois nós factuais (articulação real), um derivado, um ausente (gerador).
+        definicao = {
+            "nos": [
+                {"id": "filme", "rotulo": "Agentes de cinema", "tipo": "factual",
+                 "fonte": {"snapshot_id": m["snapshot_id"], "campo_chave": "location.municipio", "id_chave": "name"}},
+                {"id": "salas", "rotulo": "Salas de exibição", "tipo": "factual",
+                 "fonte": {"snapshot_id": o["snapshot_id"], "campo_chave": "municipio", "id_chave": "razao_social"}},
+                {"id": "preco", "rotulo": "Preço médio", "tipo": "derivado", "derivacao": "renda ÷ público"},
+                {"id": "origem", "rotulo": "Origem do público", "tipo": "ausente",
+                 "base_faltante": {
+                     "pergunta": "De onde vem o público que assiste aos filmes — e como a "
+                                 "procedência do espectador se relaciona com a origem territorial da obra?",
+                     "hipoteses_de_ligacao": ["por CEP do espectador → sala",
+                                              "por município de residência declarado"],
+                     "regime_retencao": "dado de pessoas → agregado + fixity, nunca rastro nominal"}},
+            ],
+            "arestas": [
+                {"de": "filme", "para": "salas", "eixo": "territorio", "regra": "igualdade_normalizada"},
+                {"de": "salas", "para": "preco", "tipo": "derivado"},
+                {"de": "salas", "para": "origem", "tipo": "ausente", "eixo": "agente"},
+            ],
+        }
+        perc = conn.execute(
+            """INSERT INTO percurso (nome, autor, versao_regra, definicao)
+               VALUES (%s,%s,%s,%s) RETURNING id""",
+            ("Do território à origem do público (rede de caminhos)", "Isaac (UFF)", "v1", Jsonb(definicao)),
+        ).fetchone()
+        pid = perc["id"]
+        print(f"[seed] percurso {pid} criado.")
+
     # Executa o cruzamento real 2× via API interna → 2 pontos de série temporal.
-    from sonda.api import executar_cruzamento  # import tardio: usa conexões próprias
+    from sonda.api import executar_cruzamento, executar_percurso  # import tardio
 
     print("[seed] executando cruzamento 2× (série temporal)…")
     for i in (1, 2):
@@ -93,6 +134,14 @@ def main() -> None:
         d = out["dados"]
         print(f"        execução {i}: ligados={d['ligados']} "
               f"órfãos_esq={d['orfaos_esquerda']} órfãos_dir={d['orfaos_direita']}")
+
+    print("[seed] executando percurso 2× (travessia · série temporal)…")
+    for i in (1, 2):
+        out = executar_percurso(str(pid))
+        r = out["dados"]["resumo"]
+        print(f"        travessia {i}: factuais={r['n_factuais']} "
+              f"ligados={r['ligados_total']} órfãos={r['orfaos_total']} "
+              f"elos_ausentes={r['n_elos_ausentes']} derivados={r['n_derivados']}")
 
     print("[seed] pronto. Suba a API: uvicorn sonda.api:app --reload")
 
