@@ -5,6 +5,7 @@ __pycache__
 web/node_modules
 web/dist
 docs
+data/fsa.db
 *.docx
 SondaApp.jsx
 sonda_api_client.js

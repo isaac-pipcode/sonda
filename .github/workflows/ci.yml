@@ -33,6 +33,12 @@ jobs:
           cache: pip
       - name: Instalar dependências
         run: pip install -r requirements.txt
+      - name: Baixar base FSA (hospedada fora do git; conferida pelo pin sha256)
+        if: ${{ vars.SONDA_FSA_URL != '' }}
+        env:
+          SONDA_FSA_URL: ${{ vars.SONDA_FSA_URL }}
+          SONDA_FSA_TOKEN: ${{ secrets.SONDA_FSA_TOKEN }}
+        run: python baixar_fsa.py
       - name: Testes do motor (DuckDB, sem banco)
         run: pytest tests/ -q
       - name: Seed fim-a-fim (ingestão + cruzamento + série temporal)

@@ -63,7 +63,7 @@ append-only. Ver `sonda/percurso.py` e `/api/percursos`.
 
 ## Base FSA (dataset de segunda ordem)
 
-`data/fsa.db` é uma base de pesquisa madura sobre o **Fundo Setorial do
+`data/fsa.db` (hospedada **fora do git**; ver abaixo) é uma base de pesquisa madura sobre o **Fundo Setorial do
 Audiovisual** (ANCINE): fatos, dimensões, visões analíticas estáveis e uma
 camada de proveniência/ressalvas embutida (`meta_tabela`, `meta_coluna`). Entra
 na Sonda como **base de primeira classe** ao lado do Mapa Cultural — **sem** ser
@@ -80,6 +80,13 @@ fundida a um vocabulário comum (decisão 3). O motor DuckDB a lê **in-place**
 Princípio encarnado: **impossível citar um número sem ver seu asterisco** — cada
 consulta devolve as ressalvas metodológicas das colunas retornadas. Docs da base:
 `docs/DOCUMENTACAO_MIGRACAO_SONDA.md`, `docs/MAPA_CRUZAMENTOS_SONDA.md`.
+
+**Obtendo a `fsa.db`.** A base não é versionada (só o pin `data/fsa.db.sha256`).
+Defina `SONDA_FSA_URL` (e `SONDA_FSA_TOKEN`, se a hospedagem for privada) e rode
+`python baixar_fsa.py`: o arquivo só é instalado se o sha256 bater com o pin.
+No deploy, `fly deploy --build-arg SONDA_FSA_URL=…`; no CI, a variável de
+repositório `SONDA_FSA_URL` (e o segredo opcional `SONDA_FSA_TOKEN`). Sem a
+variável, os testes da FSA são pulados.
 
 ## Base RIDAB (dataset de terceira ordem)
 

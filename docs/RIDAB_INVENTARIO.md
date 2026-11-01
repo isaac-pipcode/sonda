@@ -84,4 +84,4 @@ Pendente:
 1. `registrar_snapshot` não foi exercitado contra Postgres (os testes são offline); validar no CI com o serviço Postgres.
 2. Aresta `derivado` no percurso para `valor_captado` via SALIC (ressalvas 2 e 3).
 3. Abrir o dicionário de cada dataset de interesse para confirmar chaves (CPB, IBGE) antes de novos cruzamentos.
-4. Decidir se `data/fsa.db` continua versionado (contradiz o `AGENTS.md`).
+4. ~~Decidir se `data/fsa.db` continua versionado~~ — decidido: hospedada fora do git; o repositório guarda só o pin `data/fsa.db.sha256` e `baixar_fsa.py`. O arquivo segue no histórico dos commits anteriores (reescrever o histórico não foi feito).
