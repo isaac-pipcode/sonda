@@ -9,12 +9,13 @@ from __future__ import annotations
 
 from typing import Optional
 
+import duckdb
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
-from . import engine, fsa, percurso as percurso_mod
+from . import engine, fsa, percurso as percurso_mod, ridab
 from .db import connect, init_schema
 from .provenance import agora_utc, envelope, fixity
 
@@ -78,7 +79,8 @@ def raiz():
             "lema": "Carbono ancora. Sinal interfere. Sonar lê.",
             "recursos": ["/api/catalogo", "/api/raw/{base}", "/api/snapshots",
                          "/api/cruzamentos", "/api/percursos", "/api/fsa/tabelas",
-                         "/api/fsa/dicionario", "/api/fsa/consulta/{nome}"],
+                         "/api/fsa/dicionario", "/api/fsa/consulta/{nome}",
+                         "/api/ridab/contratos-enriquecidos"],
         },
         proveniencia={"fonte": "sonda", "nota": "infraestrutura, não fonte primária"},
     )
@@ -256,6 +258,39 @@ def fsa_consulta(nome: str, limite: int = 50, pagina: int = 1):
         proveniencia=prov,
         avisos=[f"página {pagina} · {len(res['linhas'])} linhas · dado NATIVO da FSA, não reconciliado"],
     )
+
+
+# ── RIDAB: dataset de terceira ordem, Parquet remoto fixado por revisão ───────
+@app.get("/api/ridab/contratos-enriquecidos")
+def ridab_contratos_enriquecidos(limite: int = 50, pagina: int = 1):
+    """Contratos da FSA + código IBGE do proponente + valores em R$ de 2024.
+
+    Visão calculada na consulta (nada gravado). Proveniência das DUAS bases lado
+    a lado; ressalvas das colunas derivadas viajam junto com o dado.
+    """
+    _exige_fsa()
+    try:
+        res = ridab.enriquecer_contratos(limite=limite, pagina=pagina)
+    except duckdb.IOException as e:
+        raise HTTPException(502, f"RIDAB indisponível ({type(e).__name__}); verifique a rede")
+    prov = [fsa.proveniencia_base(),
+            ridab.proveniencia_base(["agentes_economicos", "deflator_ipca"])]
+    prov[0]["ressalvas"] = {k: v for k, v in res["ressalvas"].items() if k not in ridab.RESSALVAS}
+    prov[1]["ressalvas"] = {k: v for k, v in res["ressalvas"].items() if k in ridab.RESSALVAS}
+    return envelope(
+        {"colunas": res["colunas"], "linhas": res["linhas"], "total": res["total"],
+         "com_codigo_ibge": res["com_codigo_ibge"]},
+        proveniencia=prov,
+        avisos=[f"página {pagina} · {len(res['linhas'])} linhas · "
+                f"{res['com_codigo_ibge']}/{res['total']} contratos com código IBGE · "
+                "município do cadastro ATUAL; valores nominais da FSA preservados"],
+    )
+
+
+@app.post("/api/ridab/registrar")
+def ridab_registrar():
+    """Registra o RIDAB como snapshot imutável (referência: revisão + sha256)."""
+    return envelope(ridab.registrar_snapshot(), proveniencia=ridab.proveniencia_base())
 
 
 @app.post("/api/fsa/registrar")

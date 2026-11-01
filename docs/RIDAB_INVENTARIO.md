@@ -74,9 +74,14 @@ Observação técnica: o `sqlite_scanner` do DuckDB falhou ao anexar `data/fsa.d
 preparar o esquema). Nesta verificação as tabelas foram lidas com `sqlite3` e
 carregadas no DuckDB; é o caminho de fallback já previsto em `sonda/engine.py`.
 
-## 5. Próximos passos propostos
+## 5. Estado e próximos passos
 
-1. Conector `ridab` que lê o Parquet remoto (sem commitar dados), normaliza CNPJ/SALIC e registra o snapshot com a revisão do Hugging Face como fixity.
-2. Enriquecer `fato_contrato_serie` com `codigo_municipio_ibge` e fator IPCA como **visão**, sem alterar o nativo.
-3. Aresta `derivado` no percurso para `valor_captado` via SALIC, com as ressalvas 2 e 3.
-4. Abrir o dicionário de cada dataset de interesse para confirmar chaves (CPB, IBGE) antes de planejar cruzamentos adicionais.
+Feito (`sonda/ridab.py`, `GET /api/ridab/contratos-enriquecidos`, `POST /api/ridab/registrar`, `tests/test_ridab.py`):
+leitura remota fixada por revisão, normalização de CNPJ, enriquecimento com código IBGE e fator IPCA como **visão**, ressalvas por coluna derivada.
+Contra o Hugging Face real a visão reproduz 4.094 de 4.473 contratos com código IBGE.
+
+Pendente:
+1. `registrar_snapshot` não foi exercitado contra Postgres (os testes são offline); validar no CI com o serviço Postgres.
+2. Aresta `derivado` no percurso para `valor_captado` via SALIC (ressalvas 2 e 3).
+3. Abrir o dicionário de cada dataset de interesse para confirmar chaves (CPB, IBGE) antes de novos cruzamentos.
+4. Decidir se `data/fsa.db` continua versionado (contradiz o `AGENTS.md`).

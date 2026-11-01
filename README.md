@@ -81,6 +81,22 @@ Princípio encarnado: **impossível citar um número sem ver seu asterisco** —
 consulta devolve as ressalvas metodológicas das colunas retornadas. Docs da base:
 `docs/DOCUMENTACAO_MIGRACAO_SONDA.md`, `docs/MAPA_CRUZAMENTOS_SONDA.md`.
 
+## Base RIDAB (dataset de terceira ordem)
+
+O [RIDAB](https://huggingface.co/datasets/riabr-dados/riab) reúne dados oficiais
+(ANCINE, IBGE…) **já tratados por terceiros**. É lido por DuckDB direto do Parquet
+remoto, fixado a uma **revisão** (commit) — nenhum dado é versionado aqui. Entra
+com autoria e proveniência próprias, sem fusão com a FSA (decisão 3).
+
+| Endpoint | O que devolve |
+|---|---|
+| `GET /api/ridab/contratos-enriquecidos` | contratos da FSA + código IBGE do proponente (via CNPJ) + valores em R$ de 2024; **visão calculada**, nada gravado |
+| `POST /api/ridab/registrar` | snapshot imutável (referência: revisão + sha256 por arquivo), idempotente |
+
+Variáveis: `SONDA_RIDAB_REV` (revisão fixada) e `SONDA_RIDAB_BASE` (prefixo
+alternativo dos Parquet, para testes offline/espelho). Chaves, cobertura e
+ressalvas verificadas: `docs/RIDAB_INVENTARIO.md`.
+
 ## Como rodar
 
 ```bash

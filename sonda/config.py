@@ -18,6 +18,10 @@ class Config:
     pool_max: int = 10
     # base FSA (SQLite de segunda ordem) lida in-place pelo motor DuckDB.
     fsa_db_path: str = "data/fsa.db"
+    # RIDAB (Parquet remoto no Hugging Face), fixado a uma revisão (commit).
+    ridab_revisao: str = "6c5e6ae1ce5a866b76039e1f3dce7776cf22dfe1"
+    # prefixo alternativo dos Parquet (diretório local ou espelho); vazio = Hugging Face.
+    ridab_base: str = ""
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -29,6 +33,9 @@ class Config:
             ),
             pool_max=int(os.environ.get("SONDA_POOL_MAX", "10")),
             fsa_db_path=os.environ.get("SONDA_FSA_DB", "data/fsa.db"),
+            ridab_revisao=os.environ.get(
+                "SONDA_RIDAB_REV", "6c5e6ae1ce5a866b76039e1f3dce7776cf22dfe1"),
+            ridab_base=os.environ.get("SONDA_RIDAB_BASE", ""),
         )
 
 
