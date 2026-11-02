@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { Component, useState, useEffect, useCallback } from "react";
 import { SondaAPI } from "./sonda_api_client";
 
 /*
@@ -72,14 +72,42 @@ function Estado({ carregando, erro, vazio, children }) {
   return children;
 }
 
-// hook mínimo de fetch que PRESERVA o envelope (dados + proveniencia)
+const mensagem = (e) => String(e?.message || e);
+
+// falha de uma ação do usuário (executar, bifurcar…): visível e anunciada, nunca silenciosa.
+function Falha({ erro }) {
+  if (!erro) return null;
+  return <div role="alert"><Mono cor={S.sinal}>⚠ {erro}</Mono></div>;
+}
+
+// limite de erro: um defeito de renderização numa visão não pode derrubar o app inteiro.
+class LimiteDeErro extends Component {
+  state = { erro: null };
+  static getDerivedStateFromError(erro) { return { erro }; }
+  componentDidCatch(erro, info) {
+    console.error("SONDA: falha ao renderizar a visão", erro, info?.componentStack);
+  }
+  render() {
+    if (!this.state.erro) return this.props.children;
+    return (
+      <div role="alert" style={{ background: S.carbonoSoft, border: `1px solid ${S.sinal}`, borderRadius: 8, padding: "18px 20px" }}>
+        <Mono cor={S.sinal}>⚠ esta visão falhou ao carregar — {mensagem(this.state.erro)}</Mono>
+        <Botao cor={S.sonar} onClick={() => this.setState({ erro: null })}>tentar de novo</Botao>
+      </div>
+    );
+  }
+}
+
+// hook mínimo de fetch que PRESERVA o envelope (dados + proveniencia).
+// `fn` pode devolver null (ainda sem id) ou lançar de imediato: Promise.resolve().then(fn)
+// absorve os dois casos, em vez de quebrar com "null.then" na primeira renderização.
 function useEnvelope(fn, deps = []) {
   const [env, setEnv] = useState(null);
   const [erro, setErro] = useState(null);
   const [carregando, setCarregando] = useState(true);
   const recarregar = useCallback(() => {
     setCarregando(true); setErro(null);
-    fn().then(setEnv).catch((e) => setErro(String(e.message || e))).finally(() => setCarregando(false));
+    Promise.resolve().then(fn).then(setEnv).catch((e) => setErro(mensagem(e))).finally(() => setCarregando(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   useEffect(() => { recarregar(); }, [recarregar]);
@@ -162,6 +190,7 @@ const corTipo = (t) => (t === "derivado" ? S.sonar : S.sinal);
 function Percurso() {
   const [sel, setSel] = useState(null);
   const [ocupado, setOcupado] = useState(false);
+  const [falha, setFalha] = useState(null);
 
   const { env: lista } = useEnvelope(() => SondaAPI.percursos());
   const pid = lista?.dados?.[0]?.id;
@@ -177,8 +206,9 @@ function Percurso() {
 
   const reexecutar = async () => {
     if (!pid) return;
-    setOcupado(true);
+    setOcupado(true); setFalha(null);
     try { await SondaAPI.executarPercurso(pid); recarregar(); }
+    catch (e) { setFalha(`não foi possível re-executar a travessia — ${mensagem(e)}`); }
     finally { setOcupado(false); }
   };
 
@@ -201,6 +231,7 @@ function Percurso() {
           </span>
         )}
       </div>
+      <Falha erro={falha} />
 
       <Estado carregando={carDet || carUlt} erro={erroDet} vazio={!definicao}>
         <div style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 18, marginTop: 12, alignItems: "start" }}>
@@ -437,18 +468,27 @@ function CartaoCruzamento({ c, aoMudar }) {
   const [det, setDet] = useState(null);
   const [exec, setExec] = useState(null);
   const [ocupado, setOcupado] = useState(false);
+  const [abrindo, setAbrindo] = useState(false);
+  const [falha, setFalha] = useState(null);
   const ausente = /faltante/i.test(c.nome);
 
-  const abrir = async () => { if (!det) setDet((await SondaAPI.cruzamento(c.id)).dados); };
+  const abrir = async () => {
+    if (det) return;
+    setAbrindo(true); setFalha(null);
+    try { setDet((await SondaAPI.cruzamento(c.id)).dados); }
+    catch (e) { setFalha(`não foi possível abrir a receita — ${mensagem(e)}`); }
+    finally { setAbrindo(false); }
+  };
   const executar = async () => {
-    setOcupado(true);
+    setOcupado(true); setFalha(null);
     try { setExec((await SondaAPI.executar(c.id)).dados); aoMudar?.(); }
+    catch (e) { setFalha(`não foi possível executar o cruzamento — ${mensagem(e)}`); }
     finally { setOcupado(false); }
   };
   const bifurcar = async () => {
-    const base = det || (await SondaAPI.cruzamento(c.id)).dados;
-    setOcupado(true);
+    setOcupado(true); setFalha(null);
     try {
+      const base = det || (await SondaAPI.cruzamento(c.id)).dados;
       await SondaAPI.bifurcar(c.id, {
         nome: `${c.nome} (bifurcação)`, autor: c.autor, eixo: base.receita.eixo,
         esquerda: base.receita.esquerda, direita: base.receita.direita,
@@ -457,7 +497,8 @@ function CartaoCruzamento({ c, aoMudar }) {
         base_faltante: base.receita.base_faltante || null,
       });
       aoMudar?.();
-    } finally { setOcupado(false); }
+    } catch (e) { setFalha(`não foi possível bifurcar o cruzamento — ${mensagem(e)}`); }
+    finally { setOcupado(false); }
   };
 
   const cor = ausente ? S.sinal : S.osso;
@@ -471,10 +512,11 @@ function CartaoCruzamento({ c, aoMudar }) {
       </div>
 
       <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-        <Botao cor={S.sonar} onClick={abrir}>ver receita</Botao>
+        <Botao cor={S.sonar} onClick={abrir} ocupado={abrindo}>ver receita</Botao>
         <Botao cor={S.sinal} onClick={executar} ocupado={ocupado}>▶ executar</Botao>
         <Botao cor={S.sonar} onClick={bifurcar} ocupado={ocupado}>⑂ bifurcar (discordar da regra)</Botao>
       </div>
+      <Falha erro={falha} />
 
       {det && (
         <div style={{ marginTop: 14, padding: "12px 14px", background: S.carbono, borderRadius: 4, fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: S.sedimentoSoft, lineHeight: 1.7 }}>
@@ -571,7 +613,7 @@ export default function SondaApp() {
           ))}
         </nav>
 
-        <div className="view" key={v}><Atual /></div>
+        <div className="view" key={v}><LimiteDeErro><Atual /></LimiteDeErro></div>
 
         <footer style={{ borderTop: `1px solid ${S.carbonoLine}`, marginTop: 44, paddingTop: 16, fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: S.sedimento, lineHeight: 1.7 }}>
           <div>Carbono ancora · Sinal interfere · Sonar lê. Dados servidos pela API real, com proveniência em toda resposta.</div>
