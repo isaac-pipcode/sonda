@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
-from . import engine, fsa, percurso as percurso_mod, ridab
+from . import engine, fsa, percurso as percurso_mod, ridab, series as series_mod
 from .db import connect, init_schema
 from .provenance import agora_utc, envelope, fixity
 
@@ -80,7 +80,7 @@ def raiz():
             "recursos": ["/api/catalogo", "/api/raw/{base}", "/api/snapshots",
                          "/api/cruzamentos", "/api/percursos", "/api/fsa/tabelas",
                          "/api/fsa/dicionario", "/api/fsa/consulta/{nome}",
-                         "/api/ridab/contratos-enriquecidos"],
+                         "/api/ridab/contratos-enriquecidos", "/api/series"],
         },
         proveniencia={"fonte": "sonda", "nota": "infraestrutura, não fonte primária"},
     )
@@ -285,6 +285,25 @@ def ridab_contratos_enriquecidos(limite: int = 50, pagina: int = 1):
                 f"{res['com_codigo_ibge']}/{res['total']} contratos com código IBGE · "
                 "município do cadastro ATUAL; valores nominais da FSA preservados"],
     )
+
+
+# ── séries anuais: o tempo como único eixo comum (incomensurabilidade) ────────
+@app.get("/api/series")
+def series_anuais(de: int = 2009, ate: int = 2026, moeda: str = "real"):
+    """Cinco séries anuais (FSA e RIDAB), cada uma na sua unidade e escala.
+
+    `moeda`: "real" (R$ de 2024) ou "nominal" (R$ correntes). Ano sem dado é
+    nulo, nunca zero; cada série traz cobertura, ressalvas e o que ficou de fora.
+    """
+    _exige_fsa()
+    try:
+        res = series_mod.calcular(de, ate, moeda)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except duckdb.IOException as e:
+        raise HTTPException(502, f"RIDAB indisponível ({type(e).__name__}); verifique a rede")
+    prov = [fsa.proveniencia_base(), ridab.proveniencia_base(list(series_mod.TABELAS_RIDAB))]
+    return envelope(res, proveniencia=prov, avisos=res["avisos"])
 
 
 @app.post("/api/ridab/registrar")

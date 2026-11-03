@@ -104,6 +104,18 @@ Variáveis: `SONDA_RIDAB_REV` (revisão fixada) e `SONDA_RIDAB_BASE` (prefixo
 alternativo dos Parquet, para testes offline/espelho). Chaves, cobertura e
 ressalvas verificadas: `docs/RIDAB_INVENTARIO.md`.
 
+## Séries anuais (o tempo como único eixo comum)
+
+`GET /api/series?de=2009&ate=2026&moeda=real|nominal` devolve cinco séries —
+fomento contratado (FSA), renúncia fiscal captada, público das obras brasileiras,
+salas abertas e preço médio do ingresso (RIDAB) — **cada uma na sua unidade e
+escala** (decisão 3: nada é somado nem indexado entre bases). Ano sem dado é
+`null`, nunca zero; cada série traz `cobertura`, `ressalvas` e o que ficou de
+fora (`extras`, ex.: projetos de renúncia sem data de aprovação). `real` aplica o
+fator IPCA do **ano do evento** (RIDAB/IBGE). A proveniência das duas bases vem
+lado a lado; os agregados do RIDAB são lidos uma vez por revisão (imutável).
+Núcleo em `sonda/series.py`, testável offline.
+
 ## Como rodar
 
 ```bash

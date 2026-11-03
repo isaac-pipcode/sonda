@@ -39,6 +39,8 @@ TABELAS = frozenset({
     "fomento_fsa",
     "deflator_ipca",
     "salas_exibicao_complexos",
+    "salas_exibicao_evolucao",
+    "preco_ingresso",
 })
 
 _HF_REPO = "riabr-dados/riab"
