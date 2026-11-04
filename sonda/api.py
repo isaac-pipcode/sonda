@@ -138,6 +138,8 @@ def catalogo():
             "base": r["base"],
             "entidade_nativa": r["entidade"],  # termo da base, NÃO reconciliado
             "n_registros": r["n"],
+            "unidade_registro": "registros",
+            "ordem": 1,  # coletada da fonte pela Sonda
             "ultimo_registro": str(r["ultimo_registro"]),
         }
         for r in rows
@@ -147,17 +149,33 @@ def catalogo():
     if fsa.disponivel():
         inv = fsa.inventario()["itens"]
         prov_fsa = fsa.proveniencia_base()  # calcula fixity uma vez
+        contratos = next((i["registros"] for i in inv if i["nome"] == "fato_contrato_serie"), None)
         catalogo_dados.append({
             "base": fsa.BASE,
             "entidade_nativa": "base_relacional_fsa (fatos · dimensões · visões)",
-            "n_registros": sum(i["registros"] or 0 for i in inv),
+            # soma de tabelas e visões não é contagem de nada: o número é o da tabela-fato principal.
+            "n_registros": contratos,
+            "unidade_registro": "contratos",
+            "ordem": 2,  # base de pesquisa já constituída
             "tabelas_e_visoes": len(inv),
             "acesso": "/api/fsa/tabelas · /api/fsa/dicionario · /api/fsa/consulta/{nome}",
+            "proveniencia": prov_fsa,
         })
         prov_por_base.setdefault(prov_fsa["fonte"], []).append(
             {"instancia_versao": prov_fsa["instancia_versao"],
              "entidade": "base_relacional_fsa", "fixity": prov_fsa["fixity"]}
         )
+    # RIDAB: dados oficiais tratados por terceiros, lidos remotamente na revisão fixada.
+    catalogo_dados.append({
+        "base": ridab.BASE,
+        "entidade_nativa": "parquet_remoto_ridab (dados oficiais tratados por terceiros)",
+        "n_registros": len(ridab.TABELAS),
+        "unidade_registro": "tabelas lidas pela Sonda",
+        "ordem": 3,
+        "tabelas_lidas": sorted(ridab.TABELAS),
+        "acesso": "/api/ridab/contratos-enriquecidos · /api/series · /api/territorio",
+        "proveniencia": ridab.proveniencia_base(com_sha=False),
+    })
     return envelope(
         catalogo_dados,
         proveniencia=[{"fonte": k, "snapshots": v} for k, v in prov_por_base.items()],

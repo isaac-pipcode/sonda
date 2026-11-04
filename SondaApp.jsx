@@ -27,10 +27,6 @@ const S = {
   hachura: "#8A909A",    // ausência de dado
 };
 
-// cor por base (estrutura neutra até a base se declarar)
-const COR_BASE = { oca: S.sinal, lpg: S.sonar, mapa_cultural: S.mudo };
-const corDaBase = (b) => COR_BASE[b] || S.mudo;
-
 // ——— isótipo SVG inline (a marca como componente; versão para o cabeçalho escuro) ———
 function Isotipo({ size = 40 }) {
   const linhas = [10, 22, 34, 50, 62, 78, 90];
@@ -757,64 +753,108 @@ function Ligacoes({ ir }) {
   );
 }
 
-// ============ VISÃO 1: CATÁLOGO ============
-function Catalogo() {
+// ============ CATÁLOGO: as bases agregadas, cada uma na sua língua ============
+const ORDEM = {
+  1: "1ª ordem · coletada da fonte pela Sonda",
+  2: "2ª ordem · base de pesquisa já constituída",
+  3: "3ª ordem · dados oficiais tratados por terceiros",
+};
+const NOME_BASE = { mapa_cultural: "Mapa Cultural", oca: "OCA", fsa: "FSA", ridab: "RIDAB" };
+const DESCRICAO_BASE = {
+  mapa_cultural: "Agentes culturais de cinema coletados da rede de mapas do Ministério da Cultura.",
+  oca: "Salas de exibição registradas na ANCINE, publicadas pelo Observatório Brasileiro do Cinema.",
+  fsa: "Base de pesquisa sobre o fomento do Fundo Setorial do Audiovisual: fatos, dimensões e visões, com as ressalvas de cada coluna.",
+  ridab: "Repositório Independente dos Dados do Audiovisual Brasileiro: dados oficiais da ANCINE e do IBGE, organizados por terceiros.",
+};
+
+function citacao(nome, p) {
+  const hoje = new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" });
+  return `SONDA. Observatório de Dados e Políticas do Audiovisual (UFF). ${nome}. Versão: ${p.instancia_versao || "—"}. `
+    + (p.autoria ? `Dados: ${p.autoria}${p.licenca ? `, ${p.licenca}` : ""}. ` : "")
+    + `Marca de integridade (fixity): ${p.fixity || "—"}. Acesso em: ${hoje}.`;
+}
+
+function BaseCatalogo({ b, snaps, ir }) {
+  const [copiado, setCopiado] = useState(null);
+  const nome = NOME_BASE[b.base] || b.base;
+  // proveniência: a que a API envia por base (FSA, RIDAB) ou o snapshot mais recente (bases coletadas).
+  const s0 = snaps[0];
+  const p = b.proveniencia || (s0 ? { fonte: s0.fonte, instancia_versao: s0.instancia_versao, fixity: s0.fixity, regime_retencao: s0.politica_retencao?.regime } : null);
+  const copiar = async () => {
+    try { await navigator.clipboard.writeText(citacao(nome, p)); setCopiado("Citação copiada para a área de transferência."); }
+    catch { setCopiado("Não foi possível copiar automaticamente; selecione e copie o texto da proveniência."); }
+  };
+  const linha = (rotulo, valor, mono) => valor == null || valor === "" ? null : (
+    <React.Fragment key={rotulo}>
+      <dt style={{ color: S.mudo, fontSize: 14.5 }}>{rotulo}</dt>
+      <dd style={{ margin: 0, fontFamily: mono ? FONTE_NUM : FONTE_UI, fontSize: mono ? 13.5 : 15.5, wordBreak: "break-all" }}>{valor}</dd>
+    </React.Fragment>
+  );
+  return (
+    <li style={{ display: "flex", flexWrap: "wrap", gap: "20px 40px", padding: "28px 0", borderBottom: `1px solid ${S.linha}` }}>
+      <div style={{ flex: "0 0 300px", maxWidth: "100%", display: "flex", flexDirection: "column", gap: 8 }}>
+        <span style={{ fontFamily: FONTE_NUM, fontSize: 12.5, fontWeight: 600, letterSpacing: ".1em", color: S.mudo }}>{ORDEM[b.ordem] || "—"}</span>
+        <h3 style={{ margin: 0, fontWeight: 800, fontStretch: "68%", textTransform: "uppercase", fontSize: 38, lineHeight: 1, letterSpacing: ".01em" }}>{nome}</h3>
+        <p style={{ margin: 0, fontSize: 15, lineHeight: 1.5 }}>{DESCRICAO_BASE[b.base] || ""}</p>
+        <p style={{ margin: "8px 0 0", display: "flex", alignItems: "baseline", gap: 10 }}>
+          <span style={{ fontFamily: FONTE_NUM, fontSize: 34, fontWeight: 600, lineHeight: 1 }}>{fmtNum(b.n_registros, 0)}</span>
+          <span style={{ fontSize: 14.5, color: S.mudo }}>{b.unidade_registro || "registros"}</span>
+        </p>
+      </div>
+      <div style={{ flex: "1 1 520px", minWidth: 0, display: "flex", flexDirection: "column", gap: 16 }}>
+        <dl style={{ margin: 0, display: "grid", gridTemplateColumns: "150px 1fr", gap: "8px 20px", alignItems: "baseline" }}>
+          {linha("Entidade nativa", b.entidade_nativa)}
+          {linha("Fonte", p?.fonte)}
+          {linha("Versão", p?.instancia_versao, true)}
+          {linha("Fixity", p?.fixity, true)}
+          {linha("Retenção", p?.regime_retencao)}
+          {linha("Autoria", p?.autoria)}
+          {linha("Licença", p?.licenca)}
+          {linha("Origem declarada", p?.origem_declarada)}
+          {b.tabelas_e_visoes != null && linha("Estrutura", `${b.tabelas_e_visoes} tabelas e visões`)}
+          {b.tabelas_lidas && linha("Tabelas lidas", b.tabelas_lidas.join(" · "), true)}
+        </dl>
+        {!p && <p style={{ margin: 0, fontSize: 14.5, color: S.mudo }}>Sem proveniência registrada para esta base.</p>}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
+          {p && <button type="button" onClick={copiar} style={{ minHeight: 44, padding: "0 20px", border: `2px solid ${S.tinta}`, background: S.papel, color: S.tinta, fontFamily: FONTE_UI, fontWeight: 700, fontSize: 15, cursor: "pointer" }}>Copiar citação</button>}
+          {(b.base === "fsa" || b.base === "ridab") && <button type="button" onClick={() => ir("painel")} style={{ minHeight: 44, padding: 0, border: "none", background: "transparent", color: S.sonar, fontFamily: FONTE_UI, fontWeight: 700, fontSize: 15, textDecoration: "underline", cursor: "pointer" }}>Ler no Painel →</button>}
+          <span role="status" style={{ fontSize: 14, color: S.mudo }}>{copiado}</span>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+function Catalogo({ ir }) {
   const { env, erro, carregando } = useEnvelope(() => SondaAPI.catalogo());
   const bases = env?.dados || [];
-  // proveniência vem como lista [{fonte, snapshots:[...]}] — lado a lado.
+  // proveniência vem como lista [{fonte, snapshots:[...]}] — lado a lado, não fundida.
   const provPorFonte = Array.isArray(env?.proveniencia) ? env.proveniencia : [];
   const snapsDaBase = (entidade) =>
-    provPorFonte.flatMap((p) => (p.snapshots || []).filter((s) => s.entidade === entidade)
-      .map((s) => ({ ...s, fonte: p.fonte })));
-
+    provPorFonte.flatMap((p) => (p.snapshots || []).filter((s) => s.entidade === entidade).map((s) => ({ ...s, fonte: p.fonte })));
   return (
-    <div>
-      <Lead n="01" titulo="Catálogo" sub="As bases agregadas, cada uma na sua língua. Nada é reconciliado à força." />
-      <div style={{ marginTop: 20 }}>
-        <Estado carregando={carregando} erro={erro} vazio={bases.length === 0} vazioMsg="Catálogo vazio: execute a ingestão (seed.py ou coleta_real_mapas.py).">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 14 }}>
-            {bases.map((b) => {
-              const cor = corDaBase(b.base);
-              const snaps = snapsDaBase(b.entidade_nativa);
-              const s0 = snaps[0];
-              return (
-                <div key={`${b.base}:${b.entidade_nativa}`} style={{ background: S.papel, border: `1px solid ${S.linha}`, borderTop: `3px solid ${cor}`, borderRadius: 8, padding: "16px 18px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span style={{ width: 9, height: 9, borderRadius: "50%", background: cor }} />
-                    <span style={{ fontSize: 17, fontWeight: 700, color: S.tinta, fontFamily: "'Archivo',sans-serif" }}>{b.base}</span>
-                  </div>
-                  <div style={{ marginTop: 12, fontSize: 12.5, lineHeight: 1.7, fontFamily: "'IBM Plex Mono',monospace", color: S.mudo }}>
-                    <div><span style={{ color: S.mudo }}>entidade nativa:</span> <span style={{ color: S.tinta }}>{b.entidade_nativa}</span></div>
-                    <div><span style={{ color: S.mudo }}>registros:</span> <span style={{ color: S.tinta }}>{b.n_registros}</span></div>
-                    {s0 && <div><span style={{ color: S.mudo }}>fonte:</span> <span style={{ color: S.tinta }}>{s0.fonte}</span></div>}
-                    {s0 && <div><span style={{ color: S.mudo }}>versão:</span> <span style={{ color: S.tinta }}>{s0.instancia_versao}</span></div>}
-                  </div>
-                  {/* proveniência ao alcance de um clique (porosidade 2) */}
-                  {s0 && (
-                    <details style={{ marginTop: 10 }}>
-                      <summary style={{ cursor: "pointer", fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: S.sonar }}>proveniência · {snaps.length} snapshot(s)</summary>
-                      {snaps.map((s) => (
-                        <div key={s.snapshot_id} style={{ marginTop: 6, fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: S.mudo, lineHeight: 1.5 }}>
-                          <div>↳ {s.capturado_em}</div>
-                          <div style={{ color: S.mudo }}>fixity: {String(s.fixity).slice(0, 16)}…</div>
-                          <div style={{ color: S.mudo }}>retenção: {s.politica_retencao?.regime}</div>
-                        </div>
-                      ))}
-                    </details>
-                  )}
-                </div>
-              );
-            })}
-            {/* a vaga: o convite à expansão */}
-            <div style={{ background: "transparent", border: `1.5px dashed ${S.sinalTxt}`, borderRadius: 8, padding: "16px 18px", display: "flex", flexDirection: "column", justifyContent: "center" }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: S.sinalTxt, fontFamily: "'Archivo',sans-serif" }}>+ base faltante</div>
-              <div style={{ fontSize: 11.5, color: S.mudo, fontFamily: "'IBM Plex Mono',monospace", marginTop: 6, lineHeight: 1.5 }}>
-                a Sonda cresce nas bordas. Cada elo ausente especifica o dataset que o preencheria.
-              </div>
-            </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 40, fontFamily: FONTE_UI }}>
+      <section style={{ display: "flex", flexDirection: "column", gap: 16, borderBottom: `4px solid ${S.tinta}`, paddingBottom: 30 }}>
+        <span style={{ fontFamily: FONTE_NUM, fontSize: 13, fontWeight: 600, letterSpacing: ".14em", color: S.mudo }}>CATÁLOGO · BASES AGREGADAS</span>
+        <h1 style={{ margin: 0, fontWeight: 800, fontStretch: "62%", textTransform: "uppercase", fontSize: "clamp(48px, 8vw, 104px)", lineHeight: 0.92, letterSpacing: "-.01em" }}>
+          {bases.length ? <><span style={{ color: S.sinal }}>{bases.length}</span> bases, cada uma na sua língua</> : "Catálogo"}
+        </h1>
+        <p style={{ margin: 0, maxWidth: 860, fontSize: 16, lineHeight: 1.55 }}>
+          As bases são apresentadas com a sua entidade nativa, versão e marca de integridade (fixity), sem imposição de esquema unificado. Cada base declara a sua ordem de agregação — coletada da fonte, constituída por pesquisa ou tratada por terceiros —, porque a distância entre o dado e a fonte de origem condiciona o que dele se pode afirmar.
+        </p>
+      </section>
+      <Estado carregando={carregando} erro={erro} vazio={bases.length === 0} vazioMsg="Catálogo vazio: execute a ingestão (seed.py ou coleta_real_mapas.py).">
+        <ol style={{ margin: 0, padding: 0, listStyle: "none", borderTop: `2px solid ${S.tinta}` }}>
+          {bases.map((b) => <BaseCatalogo key={`${b.base}:${b.entidade_nativa}`} b={b} snaps={snapsDaBase(b.entidade_nativa)} ir={ir} />)}
+        </ol>
+        <section aria-labelledby="sec-falta" style={{ display: "flex", flexWrap: "wrap", gap: "16px 40px", alignItems: "center", border: `2px dashed ${S.sinalTxt}`, padding: "24px 28px" }}>
+          <div style={{ flex: "1 1 420px", display: "flex", flexDirection: "column", gap: 6 }}>
+            <TituloSecao id="sec-falta">Base faltante</TituloSecao>
+            <p style={{ margin: 0, fontSize: 15.5, lineHeight: 1.5 }}>A Sonda cresce pelas bordas: cada elo ausente especifica o conjunto de dados que o preencheria.</p>
           </div>
-        </Estado>
-      </div>
+          <button type="button" onClick={() => ir("ligacoes")} style={{ minHeight: 44, padding: "0 20px", border: `2px solid ${S.tinta}`, background: S.papel, color: S.tinta, fontFamily: FONTE_UI, fontWeight: 700, fontSize: 15, cursor: "pointer" }}>Ver os elos ausentes →</button>
+        </section>
+      </Estado>
     </div>
   );
 }
@@ -1013,79 +1053,146 @@ function PainelPercurso({ sel, nos, saltos, arestas }) {
   );
 }
 
-// ============ VISÃO 3: TRAJETÓRIA (série temporal real) ============
-function Trajetoria() {
-  // escolhe o primeiro cruzamento executável e lê sua série.
+// ============ TRAJETÓRIA: um cruzamento como série temporal ============
+const fmtData = (d) => d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
+const fmtHora = (d) => d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
+function Trajetoria({ ir }) {
   const { env: lista } = useEnvelope(() => SondaAPI.cruzamentos());
   const candidatos = (lista?.dados || []).filter((c) => c.execucoes > 0 && !/faltante/i.test(c.nome));
-  const cid = candidatos[0]?.id;
+  const [escolhido, setEscolhido] = useState(null);
+  const cid = escolhido ?? candidatos[0]?.id;
   const { env, erro, carregando } = useEnvelope(async () => (cid ? SondaAPI.cruzamento(cid) : null), [cid]);
-  const serie = (env?.dados?.serie || []).map((s) => ({
-    d: new Date(s.data).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
-    lig: s.ligados, orf: s.orfaos, mig: s.tipo === "migracao",
-  }));
-
-  return (
-    <div>
-      <Lead n="03" titulo="Trajetória" sub="O cruzamento como série temporal. A regra é fixa; a variação mede o mundo." />
-      <div style={{ marginTop: 20 }}>
-        <Estado carregando={carregando} erro={erro} vazio={serie.length === 0}>
-          <GraficoSerie serie={serie} nome={env?.dados?.nome} />
-        </Estado>
-      </div>
+  const serie = (env?.dados?.serie || []).map((s) => ({ data: new Date(s.data), lig: s.ligados, orf: s.orfaos, mig: s.tipo === "migracao" }));
+  const n = serie.length;
+  const prim = serie[0], ult = serie[n - 1];
+  const taxa = ult && ult.lig + ult.orf ? (ult.lig / (ult.lig + ult.orf)) * 100 : 0;
+  const maxV = Math.max(1, ...serie.flatMap((s) => [s.lig, s.orf]));
+  const passo = Math.ceil(maxV / 4);
+  const topo = passo * 4;
+  const ticks = [0, 1, 2, 3, 4].map((i) => i * passo);
+  const identicas = n > 1 && serie.every((s) => s.lig === prim.lig && s.orf === prim.orf);
+  const mesmoDia = n > 1 && serie.every((s) => fmtData(s.data) === fmtData(prim.data));
+  const delta = (a, b, piora) => {
+    const dd = b - a;
+    if (dd === 0) return `= sem variação desde a 1ª execução (${a} → ${b})`;
+    return `${dd > 0 ? "▲" : "▼"} ${dd > 0 ? "+" : ""}${dd} desde a 1ª execução${piora ? (dd > 0 ? " (mais órfãos)" : " (menos órfãos)") : ""}`;
+  };
+  const tile = (rotulo, valor, apoio) => (
+    <div style={{ flex: "1 1 260px", borderTop: `4px solid ${S.tinta}`, paddingTop: 14, display: "flex", flexDirection: "column", gap: 4 }}>
+      <span style={{ fontFamily: FONTE_NUM, fontSize: 12.5, fontWeight: 600, letterSpacing: ".1em", color: S.mudo }}>{rotulo}</span>
+      <span style={{ fontWeight: 800, fontStretch: "62%", fontSize: 76, lineHeight: 0.9 }}>{valor}</span>
+      <span style={{ fontSize: 14.5, color: S.tinta }}>{apoio}</span>
     </div>
   );
-}
 
-function GraficoSerie({ serie, nome }) {
-  const [hv, setHv] = useState(null);
-  const W = 640, H = 240, pL = 38, pR = 16, pT = 18, pB = 42;
-  const iW = W - pL - pR, iH = H - pT - pB;
-  const maxY = Math.max(1, ...serie.flatMap((s) => [s.lig, s.orf])) * 1.2;
-  const n = serie.length;
-  const x = (i) => pL + (n > 1 ? (i / (n - 1)) * iW : iW / 2);
-  const y = (v) => pT + iH - (v / maxY) * iH;
-  const line = (key) => serie.map((s, i) => `${i ? "L" : "M"} ${x(i)} ${y(s[key])}`).join(" ");
-  const ult = serie[n - 1] || { lig: 0, orf: 0 };
-  const prim = serie[0] || { lig: 0, orf: 0 };
-  const taxa = ult.lig + ult.orf ? Math.round((ult.lig / (ult.lig + ult.orf)) * 100) : 0;
   return (
-    <>
-      {nome && <Mono cor={S.mudo}>↳ {nome}</Mono>}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, margin: "12px 0 16px" }}>
-        <Metric label="taxa de ligação" v={`${taxa}%`} cor={S.sonar} />
-        <Metric label="Δ ligações" v={`${ult.lig - prim.lig >= 0 ? "+" : ""}${ult.lig - prim.lig}`} cor={S.sonar} />
-        <Metric label="Δ órfãos" v={`${ult.orf - prim.orf >= 0 ? "+" : ""}${ult.orf - prim.orf}`} cor={S.sinalTxt} />
-      </div>
-      <div style={{ background: S.papel, border: `1px solid ${S.linha}`, borderRadius: 8, padding: "14px 16px 6px" }}>
-        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto" }}>
-          {[0, 0.5, 1].map((f, i) => { const yy = pT + iH - f * iH; return <line key={i} x1={pL} y1={yy} x2={W - pR} y2={yy} stroke={S.linha} strokeDasharray="2 4" />; })}
-          <path d={line("orf")} fill="none" stroke={S.sinal} strokeWidth="2" strokeDasharray="5 4" opacity="0.85" />
-          <path d={line("lig")} fill="none" stroke={S.sonar} strokeWidth="2.5" />
-          {serie.map((s, i) => (
-            <g key={i} onMouseEnter={() => setHv(i)} onMouseLeave={() => setHv(null)} style={{ cursor: "pointer" }}>
-              <rect x={x(i) - 14} y={pT} width="28" height={iH} fill={hv === i ? "rgba(11,13,16,.06)" : "transparent"} />
-              <circle cx={x(i)} cy={y(s.orf)} r={hv === i ? 5.5 : 3.5} fill={S.sinal} />
-              <circle cx={x(i)} cy={y(s.lig)} r={hv === i ? 5.5 : 3.5} fill={S.sonar} />
-              {s.mig && <text x={x(i)} y={y(s.lig) - 11} textAnchor="middle" fontSize="12" fill={S.sinalTxt}>⚠</text>}
-              <text x={x(i)} y={H - 22} textAnchor="middle" fontSize="9.5" fill={S.mudo} fontFamily="'IBM Plex Mono',monospace">{s.d}</text>
-            </g>
-          ))}
-          <g fontFamily="'IBM Plex Mono',monospace" fontSize="10">
-            <circle cx={pL + 4} cy={H - 6} r="4" fill={S.sonar} /><text x={pL + 13} y={H - 3} fill={S.tinta}>ligações</text>
-            <circle cx={pL + 90} cy={H - 6} r="4" fill={S.sinal} /><text x={pL + 99} y={H - 3} fill={S.tinta}>órfãos</text>
-          </g>
-        </svg>
-        <div style={{ minHeight: 30, padding: "6px 2px" }}>
-          {hv != null && serie[hv] && (
-            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, color: serie[hv].mig ? S.sinalTxt : S.mudo }}>
-              {serie[hv].mig ? "⚠ " : "→ "}{serie[hv].d} · ligações {serie[hv].lig} · órfãos {serie[hv].orf}
-              {serie[hv].mig ? " · variação por migração de esquema, não fenômeno real" : ""}
-            </span>
-          )}
-        </div>
-      </div>
-    </>
+    <div style={{ display: "flex", flexDirection: "column", gap: 44, fontFamily: FONTE_UI }}>
+      <section style={{ display: "flex", flexDirection: "column", gap: 16, borderBottom: `4px solid ${S.tinta}`, paddingBottom: 30 }}>
+        <span style={{ fontFamily: FONTE_NUM, fontSize: 13, fontWeight: 600, letterSpacing: ".14em", color: S.mudo }}>TRAJETÓRIA · UM CRUZAMENTO AO LONGO DO TEMPO</span>
+        <h1 style={{ margin: 0, fontWeight: 800, fontStretch: "62%", textTransform: "uppercase", fontSize: "clamp(48px, 8vw, 104px)", lineHeight: 0.92, letterSpacing: "-.01em" }}>
+          A regra é fixa; a variação mede o mundo
+        </h1>
+        <p style={{ margin: 0, maxWidth: 860, fontSize: 16, lineHeight: 1.55 }}>
+          Execuções sucessivas de um mesmo cruzamento constituem uma série temporal. Como a regra permanece fixa, a variação entre execuções decorre de mudança nas fontes — ou, quando assinalado, de migração de esquema, que não deve ser lida como fenômeno.
+        </p>
+        {candidatos.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, maxWidth: 680 }}>
+            <label htmlFor="cruz-sel" style={{ fontFamily: FONTE_NUM, fontSize: 13, fontWeight: 600, letterSpacing: ".1em", color: S.mudo }}>CRUZAMENTO LIDO</label>
+            <select id="cruz-sel" value={cid || ""} onChange={(e) => setEscolhido(e.target.value)} style={{ minHeight: 48, border: `2px solid ${S.tinta}`, background: S.papel, padding: "0 12px", fontFamily: FONTE_UI, fontWeight: 600, fontSize: 16, color: S.tinta }}>
+              {candidatos.map((c) => <option key={c.id} value={c.id}>{c.nome} · {c.execucoes} execução(ões)</option>)}
+            </select>
+          </div>
+        )}
+      </section>
+
+      <Estado carregando={carregando} erro={erro} vazio={n === 0} vazioMsg="Nenhum cruzamento com execuções registradas. Execute um cruzamento em Cruzamentos para iniciar a série.">
+        {n > 0 && (
+          <>
+            <section aria-label="Resumo" style={{ display: "flex", flexWrap: "wrap", gap: "20px 32px" }}>
+              {tile("TAXA DE LIGAÇÃO", `${fmtNum(taxa, 0)}%`, "ligados ÷ (ligados + órfãos), na última execução")}
+              {tile("LIGADOS", fmtNum(ult.lig, 0), delta(prim.lig, ult.lig, false))}
+              {tile("ÓRFÃOS", fmtNum(ult.orf, 0), delta(prim.orf, ult.orf, true))}
+            </section>
+
+            <section aria-labelledby="sec-traj" style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "10px 32px", alignItems: "baseline", justifyContent: "space-between" }}>
+                <TituloSecao id="sec-traj">Ligados e órfãos por execução</TituloSecao>
+                <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexWrap: "wrap", gap: "8px 24px", fontSize: 14.5 }}>
+                  <li style={{ display: "flex", alignItems: "center", gap: 8 }}><span aria-hidden="true" style={{ width: 14, height: 14, background: S.tinta, display: "inline-block" }} />ligados</li>
+                  <li style={{ display: "flex", alignItems: "center", gap: 8 }}><span aria-hidden="true" style={{ width: 14, height: 14, background: S.sinal, display: "inline-block" }} />órfãos</li>
+                  <li style={{ display: "flex", alignItems: "center", gap: 8 }}><span aria-hidden="true" style={{ width: 18, height: 18, border: `2px solid ${S.sinalTxt}`, boxSizing: "border-box", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: S.sinalTxt }}>!</span>migração de esquema na fonte</li>
+                </ul>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <div role="img" aria-label={`Barras de ligados e órfãos em ${n} execuções. Na última: ${ult.lig} ligados e ${ult.orf} órfãos.`} style={{ minWidth: Math.max(520, n * 96 + 60), display: "flex", gap: 12 }}>
+                  <div aria-hidden="true" style={{ flex: "0 0 36px", height: 300, display: "flex", flexDirection: "column-reverse", justifyContent: "space-between", alignItems: "flex-end", fontFamily: FONTE_NUM, fontSize: 12.5, color: S.mudo, lineHeight: 1 }}>
+                    {ticks.map((t) => <span key={t}>{fmtNum(t, 0)}</span>)}
+                  </div>
+                  <div style={{ flex: "1 1 0", minWidth: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div style={{ position: "relative", height: 300, borderLeft: `2px solid ${S.tinta}`, borderBottom: `2px solid ${S.tinta}` }}>
+                      {ticks.slice(1).map((t, i) => <div key={t} aria-hidden="true" style={{ position: "absolute", left: 0, right: 0, top: `${(1 - t / topo) * 100}%`, borderTop: `1px solid ${S.linha}` }} />)}
+                      <div style={{ position: "absolute", inset: 0, display: "flex" }}>
+                        {serie.map((s, i) => (
+                          <div key={i} style={{ flex: "1 1 0", minWidth: 0, height: "100%", display: "flex", gap: 8, alignItems: "flex-end", justifyContent: "center", position: "relative" }}>
+                            {s.mig && <span aria-hidden="true" style={{ position: "absolute", top: 0, left: "50%", transform: "translateX(-50%)", width: 22, height: 22, border: `2px solid ${S.sinalTxt}`, boxSizing: "border-box", background: S.papel, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: S.sinalTxt }}>!</span>}
+                            {[[s.lig, S.tinta], [s.orf, S.sinal]].map(([v, cor], j) => (
+                              <div key={j} style={{ width: "min(36%, 64px)", height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "center", gap: 4 }}>
+                                <span style={{ fontFamily: FONTE_NUM, fontSize: 15, fontWeight: 600 }}>{fmtNum(v, 0)}</span>
+                                <span style={{ width: "100%", height: `${(v / topo) * 100}%`, minHeight: v > 0 ? 2 : 0, background: cor, display: "block" }} />
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex" }}>
+                      {serie.map((s, i) => (
+                        <div key={i} style={{ flex: "1 1 0", minWidth: 0, textAlign: "center", display: "flex", flexDirection: "column" }}>
+                          <span style={{ fontWeight: 600, fontSize: 14.5 }}>Execução {i + 1}</span>
+                          <span style={{ fontFamily: FONTE_NUM, fontSize: 12.5, color: S.mudo }}>{fmtData(s.data)} · {fmtHora(s.data)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, borderTop: `1px solid ${S.linha}`, paddingTop: 18, fontSize: 15.5, lineHeight: 1.5, maxWidth: 860 }}>
+                {n < 2 && <p style={{ margin: 0 }}>Há uma única execução: a série começa com duas. Registre uma nova execução em Cruzamentos.</p>}
+                {identicas && <p style={{ margin: 0 }}>As {n} execuções registradas não diferem entre si{mesmoDia ? ` e foram feitas no mesmo dia (${fmtData(prim.data)})` : ""}: as fontes não mudaram no intervalo. Para ler uma tendência, é preciso registrar execuções ao longo do tempo.</p>}
+                {serie.some((s) => s.mig) && <p style={{ margin: 0 }}><strong style={{ color: S.sinalTxt }}>Migração de esquema.</strong> Nas execuções assinaladas com “!”, a variação decorre de mudança no esquema da fonte, e não de fenômeno real.</p>}
+              </div>
+              <details style={{ borderTop: `1px solid ${S.linha}`, paddingTop: 14 }}>
+                <summary style={{ fontWeight: 700, fontSize: 15, color: S.sonar, cursor: "pointer", minHeight: 44, display: "flex", alignItems: "center" }}>Ver os dados em tabela</summary>
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ borderCollapse: "collapse", minWidth: 480, fontSize: 15, marginTop: 8 }}>
+                    <caption style={{ textAlign: "left", fontSize: 13.5, color: S.mudo, paddingBottom: 8 }}>Resultado por execução</caption>
+                    <thead><tr style={{ borderBottom: `2px solid ${S.tinta}` }}>{["Execução", "Data e hora", "Ligados", "Órfãos", "Nota"].map((h) => <th key={h} scope="col" style={{ textAlign: "left", padding: "10px 16px 10px 0", fontWeight: 700 }}>{h}</th>)}</tr></thead>
+                    <tbody>
+                      {serie.map((s, i) => (
+                        <tr key={i} style={{ borderBottom: `1px solid ${S.linha}` }}>
+                          <th scope="row" style={{ textAlign: "left", fontWeight: 500, padding: "10px 16px 10px 0" }}>{i + 1}</th>
+                          <td style={{ padding: "10px 16px 10px 0", fontFamily: FONTE_NUM, fontSize: 14 }}>{fmtData(s.data)} {fmtHora(s.data)}</td>
+                          <td style={{ padding: "10px 16px 10px 0", fontFamily: FONTE_NUM }}>{s.lig}</td>
+                          <td style={{ padding: "10px 16px 10px 0", fontFamily: FONTE_NUM }}>{s.orf}</td>
+                          <td style={{ padding: "10px 0" }}>{s.mig ? "migração de esquema" : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            </section>
+
+            <section aria-label="Proveniência desta série" style={{ display: "flex", flexWrap: "wrap", gap: "8px 32px", borderTop: `4px solid ${S.tinta}`, paddingTop: 20, fontSize: 15, color: S.mudo }}>
+              <span><strong style={{ color: S.tinta, fontWeight: 600 }}>Cruzamento</strong> {env?.dados?.nome}</span>
+              <span><strong style={{ color: S.tinta, fontWeight: 600 }}>Execuções</strong> {n}</span>
+              <button type="button" onClick={() => ir("cruzamentos")} style={{ minHeight: 44, padding: 0, border: "none", background: "transparent", color: S.sonar, fontFamily: FONTE_UI, fontWeight: 700, fontSize: 15, textDecoration: "underline", cursor: "pointer" }}>Ver a receita e registrar nova execução →</button>
+            </section>
+          </>
+        )}
+      </Estado>
+    </div>
   );
 }
 
@@ -1209,15 +1316,6 @@ function Lead({ n, titulo, sub }) {
     </div>
   );
 }
-function Metric({ label, v, cor }) {
-  return (
-    <div style={{ background: S.papel, border: `1px solid ${S.linha}`, borderRadius: 6, padding: "12px 14px" }}>
-      <div style={{ fontSize: 26, fontWeight: 800, color: cor, fontFamily: "'Archivo',sans-serif" }}>{v}</div>
-      <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: S.mudo, marginTop: 2, textTransform: "uppercase", letterSpacing: ".04em" }}>{label}</div>
-    </div>
-  );
-}
-
 const VISOES = [
   { id: "painel", rotulo: "PAINEL", comp: Painel },
   { id: "territorio", rotulo: "TERRITÓRIO", comp: Territorio },
@@ -1232,7 +1330,7 @@ export default function SondaApp() {
   const [v, setV] = useState("painel");
   const Atual = VISOES.find((x) => x.id === v).comp;
   const ir = (id) => { setV(id); if (typeof window !== "undefined") window.scrollTo(0, 0); };
-  const larg = ["painel", "territorio", "ligacoes"].includes(v) ? 1280 : 940;
+  const larg = ["painel", "territorio", "ligacoes", "catalogo", "trajetoria"].includes(v) ? 1280 : 940;
   return (
     <div style={{ minHeight: "100vh", background: S.papel, color: S.tinta, fontFamily: "'Archivo',sans-serif" }}>
       <style>{`
