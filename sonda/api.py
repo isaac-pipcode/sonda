@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
-from . import engine, fsa, percurso as percurso_mod, ridab, series as series_mod
+from . import engine, fsa, funil as funil_mod, percurso as percurso_mod, ridab, series as series_mod, territorio as territorio_mod
 from .db import connect, init_schema
 from .provenance import agora_utc, envelope, fixity
 
@@ -80,7 +80,8 @@ def raiz():
             "recursos": ["/api/catalogo", "/api/raw/{base}", "/api/snapshots",
                          "/api/cruzamentos", "/api/percursos", "/api/fsa/tabelas",
                          "/api/fsa/dicionario", "/api/fsa/consulta/{nome}",
-                         "/api/ridab/contratos-enriquecidos", "/api/series"],
+                         "/api/ridab/contratos-enriquecidos", "/api/series",
+                         "/api/territorio", "/api/ligacoes/funil"],
         },
         proveniencia={"fonte": "sonda", "nota": "infraestrutura, não fonte primária"},
     )
@@ -304,6 +305,36 @@ def series_anuais(de: int = 2009, ate: int = 2026, moeda: str = "real"):
         raise HTTPException(502, f"RIDAB indisponível ({type(e).__name__}); verifique a rede")
     prov = [fsa.proveniencia_base(), ridab.proveniencia_base(list(series_mod.TABELAS_RIDAB))]
     return envelope(res, proveniencia=prov, avisos=res["avisos"])
+
+
+@app.get("/api/territorio")
+def territorio(moeda: str = "real"):
+    """Fomento contratado do FSA e salas de exibição por UF (da produtora proponente).
+
+    Partes calculadas sobre os contratos com UF; os sem UF vêm à parte. População
+    inconsistente é sinalizada em `verificar`, não corrigida em silêncio.
+    """
+    _exige_fsa()
+    try:
+        res = territorio_mod.calcular(moeda)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except duckdb.IOException as e:
+        raise HTTPException(502, f"RIDAB indisponível ({type(e).__name__}); verifique a rede")
+    prov = [fsa.proveniencia_base(), ridab.proveniencia_base(["deflator_ipca"])]
+    return envelope(res, proveniencia=prov, avisos=res["ressalvas"])
+
+
+@app.get("/api/ligacoes/funil")
+def ligacoes_funil():
+    """Do contrato do FSA à obra (CPB) e à bilheteria: o que liga, o que sobra e o elo ausente.
+
+    Órfãos são achado, nunca filtro: cada salto devolve os segmentos exclusivos e a
+    confiança do vínculo.
+    """
+    _exige_fsa()
+    res = funil_mod.calcular()
+    return envelope(res, proveniencia=fsa.proveniencia_base(), avisos=res["ressalvas"])
 
 
 @app.post("/api/ridab/registrar")

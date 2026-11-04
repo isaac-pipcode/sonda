@@ -33,6 +33,26 @@ def _num(v: Any) -> Optional[float]:
 
 
 # ── agregados do RIDAB (uma leitura por revisão: a revisão é imutável) ─────────
+_cache_fator: dict[str, dict] = {}
+
+
+def _fator_ipca(base: Optional[str]) -> dict[int, float]:
+    """Fator IPCA (R$ de 2024) por ano, lido do RIDAB; leve e cacheado por revisão."""
+    chave = ridab.revisao()
+    if base is None and chave in _cache_fator:
+        return _cache_fator[chave]
+    con = ridab._conexao(base)
+    try:
+        linhas = con.execute("SELECT ano, fator_real_2024 FROM read_parquet(?)",
+                             [ridab.url_tabela("deflator_ipca", base)]).fetchall()
+    finally:
+        con.close()
+    fator = {int(a): float(f) for a, f in linhas}
+    if base is None:
+        _cache_fator[chave] = fator
+    return fator
+
+
 def _agregados_ridab(base: Optional[str]) -> dict:
     chave = ridab.revisao()
     if base is None and chave in _cache_ridab:
@@ -43,8 +63,7 @@ def _agregados_ridab(base: Optional[str]) -> dict:
         def consulta(sql: str, tabela: str) -> list[tuple]:
             return con.execute(sql, [ridab.url_tabela(tabela, base)]).fetchall()
 
-        fator = {int(a): float(f) for a, f in consulta(
-            "SELECT ano, fator_real_2024 FROM read_parquet(?)", "deflator_ipca")}
+        fator = _fator_ipca(base)
 
         renuncia: dict[int, tuple[float, int]] = {}
         sem_ano = (0, 0.0)

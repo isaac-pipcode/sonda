@@ -116,6 +116,14 @@ fator IPCA do **ano do evento** (RIDAB/IBGE). A proveniência das duas bases vem
 lado a lado; os agregados do RIDAB são lidos uma vez por revisão (imutável).
 Núcleo em `sonda/series.py`, testável offline.
 
+`GET /api/territorio?moeda=real|nominal` devolve o fomento contratado do FSA e as
+salas de exibição **por UF da produtora proponente** (não do local da obra): as
+partes são calculadas sobre os contratos com UF, os sem UF vêm à parte, e uma
+população que contradiz os municípios da própria base é sinalizada em `verificar`,
+não corrigida. `GET /api/ligacoes/funil` mostra o que liga e o que sobra do contrato
+à obra (CPB) e à bilheteria, com segmentos exclusivos (seguro · ambíguo · sem obra),
+órfãos por ano e por chamada, os maiores contratos sem obra e o elo ausente.
+
 ## Como rodar
 
 ```bash
