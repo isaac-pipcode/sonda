@@ -27,6 +27,8 @@ async function post(rota, corpo) {
 
 export const SondaAPI = {
   catalogo: () => get("/api/catalogo"),
+  territorio: ({ moeda = "real" } = {}) => get(`/api/territorio?moeda=${moeda}`),
+  funil: () => get("/api/ligacoes/funil"),
   // séries anuais (FSA + RIDAB), cada uma na sua unidade; moeda: "real" | "nominal"
   series: ({ de = 2009, ate = 2026, moeda = "real" } = {}) =>
     get(`/api/series?de=${de}&ate=${ate}&moeda=${moeda}`),

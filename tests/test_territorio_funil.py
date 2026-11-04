@@ -65,7 +65,7 @@ def test_territorio_salas_e_razao_por_100_mil(fontes):
 def test_populacao_menor_que_a_dos_municipios_e_sinalizada_nao_corrigida(fontes):
     sq, base = fontes
     uf = {u["sigla"]: u for u in territorio.calcular("nominal", fsa_con=sq, base=base)["ufs"]}
-    assert "impossível" in uf["RO"]["verificar"]
+    assert "(800.000), o que é impossível" in uf["RO"]["verificar"]   # milhar com ponto, vírgula preservada
     assert uf["RO"]["populacao"] == 500_000                  # o dado nativo é preservado
     assert uf["RO"]["fomento_por_habitante"] is None        # mas não vira per capita
     assert uf["SP"]["verificar"] is None

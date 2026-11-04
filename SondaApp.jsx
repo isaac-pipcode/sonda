@@ -367,6 +367,396 @@ function Painel({ ir }) {
   );
 }
 
+// ============ TERRITÓRIO: fomento do FSA e salas de exibição, por UF ============
+// Cartograma de quadrados iguais: indica posição, não área. [coluna, linha] em grade 7 × 8.
+const GRADE = {
+  RR: [3, 1], AP: [5, 1],
+  AM: [2, 2], PA: [4, 2], MA: [5, 2], CE: [6, 2], RN: [7, 2],
+  AC: [1, 3], RO: [2, 3], MT: [3, 3], TO: [4, 3], PI: [5, 3], PE: [6, 3], PB: [7, 3],
+  MS: [3, 4], GO: [4, 4], BA: [5, 4], AL: [6, 4], SE: [7, 4],
+  DF: [4, 5], MG: [5, 5], ES: [6, 5],
+  SP: [5, 6], RJ: [6, 6],
+  PR: [5, 7],
+  RS: [4, 8], SC: [5, 8],
+};
+// rampas monotônicas em luminosidade: a ordem se lê sem depender do matiz.
+const RAMPA_FOMENTO = ["#ECEEF0", "#C3C8CE", "#8C939C", "#4A5058", "#0B0D10"];
+const RAMPA_SALAS = ["#E4F3F0", "#A6DCD3", "#4DB8A8", "#00796B", "#00443C"];
+const TEXTO_RAMPA = [S.tinta, S.tinta, S.tinta, "#FFFFFF", "#FFFFFF"];
+const binFomento = (v) => (v < 10 ? 0 : v < 30 ? 1 : v < 100 ? 2 : v < 300 ? 3 : 4);
+const binSalas = (v) => (v < 1 ? 0 : v < 1.5 ? 1 : v < 2 ? 2 : v < 2.5 ? 3 : 4);
+const HACHURA_VERIFICAR = `repeating-linear-gradient(135deg, ${S.hachura} 0 1px, ${S.papel} 1px 5px)`;
+
+function SeletorMoeda({ moeda, aoMudar }) {
+  const b = (valor, rotulo, primeiro) => (
+    <button type="button" onClick={() => aoMudar(valor)} aria-pressed={moeda === valor}
+      style={{ minHeight: 44, padding: "0 18px", border: `2px solid ${S.tinta}`, borderRight: primeiro ? "none" : `2px solid ${S.tinta}`, background: moeda === valor ? S.tinta : S.papel, color: moeda === valor ? S.papel : S.tinta, fontFamily: FONTE_UI, fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
+      {rotulo}
+    </button>
+  );
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "12px 16px" }}>
+      <span id="rot-moeda-t" style={{ fontFamily: FONTE_NUM, fontSize: 13, fontWeight: 600, letterSpacing: ".1em", color: S.mudo }}>VALORES EM</span>
+      <div role="group" aria-labelledby="rot-moeda-t" style={{ display: "flex" }}>
+        {b("nominal", "R$ correntes", true)}
+        {b("real", "R$ de 2024 (IPCA)", false)}
+      </div>
+    </div>
+  );
+}
+
+function MapaUF({ titulo, subtitulo, ufs, ufSel, aoSel, texto, cor, legenda }) {
+  return (
+    <div style={{ flex: "0 0 374px", maxWidth: "100%", display: "flex", flexDirection: "column", gap: 14 }}>
+      <h3 style={{ margin: 0, fontFamily: FONTE_NUM, fontSize: 13, fontWeight: 600, letterSpacing: ".1em", lineHeight: 1.4 }}>
+        {titulo}<br /><span style={{ color: S.mudo }}>{subtitulo}</span>
+      </h3>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 50px)", gridTemplateRows: "repeat(8, 50px)", gap: 4 }}>
+        {ufs.map((u) => {
+          const pos = GRADE[u.sigla];
+          if (!pos) return null;
+          const c = cor(u);
+          return (
+            <button key={u.sigla} type="button" tabIndex={-1} onClick={() => aoSel(u.sigla)} onMouseEnter={() => aoSel(u.sigla)}
+              aria-label={`${u.nome}: ${texto(u).aria}`}
+              style={{ gridColumn: pos[0], gridRow: pos[1], background: c.bg, color: c.fg, boxShadow: u.sigla === ufSel ? `inset 0 0 0 4px ${S.sinal}` : "none", border: "none", padding: 0, cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 1, fontFamily: FONTE_NUM, lineHeight: 1.05 }}>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>{u.sigla}</span>
+              <span style={{ fontSize: 12 }}>{texto(u).curto}</span>
+            </button>
+          );
+        })}
+      </div>
+      <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexWrap: "wrap", gap: "6px 14px", fontFamily: FONTE_NUM, fontSize: 12, color: S.tinta }}>
+        {legenda.map((l) => (
+          <li key={l.rotulo} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span aria-hidden="true" style={{ width: 14, height: 14, display: "inline-block", boxSizing: "border-box", background: l.cor, border: `1px solid ${S.linha}` }} />{l.rotulo}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function Territorio() {
+  const [moeda, setMoeda] = useState("real");
+  const [uf, setUf] = useState("RJ");
+  const { env, erro, carregando } = useEnvelope(() => SondaAPI.territorio({ moeda }), [moeda]);
+  const d = env?.dados;
+  const ufs = d?.ufs || [];
+  const sel = ufs.find((u) => u.sigla === uf) || ufs[0];
+  const conc = d?.concentracao;
+  const ressalvas = d?.ressalvas || [];
+  const unidade = d?.unidade || "";
+
+  const X = (v) => 48 + (v / 35) * 380;
+  const Y = (v) => 388 - (v / 35) * 376;
+  const linhaDl = (rotulo, valor) => (
+    <React.Fragment key={rotulo}>
+      <dt style={{ color: S.tinta, fontSize: 15 }}>{rotulo}</dt>
+      <dd style={{ margin: 0, fontFamily: FONTE_NUM, fontWeight: 600, fontSize: 17, textAlign: "right" }}>{valor}</dd>
+    </React.Fragment>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 44, fontFamily: FONTE_UI }}>
+      <section style={{ display: "flex", flexDirection: "column", gap: 16, borderBottom: `4px solid ${S.tinta}`, paddingBottom: 30 }}>
+        <span style={{ fontFamily: FONTE_NUM, fontSize: 13, fontWeight: 600, letterSpacing: ".14em", color: S.mudo }}>TERRITÓRIO · FOMENTO DO FSA E SALAS DE EXIBIÇÃO, POR UF</span>
+        <h1 style={{ margin: 0, fontWeight: 800, fontStretch: "62%", textTransform: "uppercase", fontSize: "clamp(48px, 8vw, 104px)", lineHeight: 0.92, letterSpacing: "-.01em" }}>
+          {conc ? <>{conc.ufs.join(" e ")}: <span style={{ color: S.sinal }}>{fmtNum(conc.parte_salas, 0)}%</span> das salas, <span style={{ color: S.sinal }}>{fmtNum(conc.parte_fomento, 0)}%</span> do fomento</> : "Território"}
+        </h1>
+        <p style={{ margin: 0, maxWidth: 840, fontSize: 16, lineHeight: 1.55 }}>
+          Cada quadrado representa uma unidade da federação, todas de igual tamanho: o cartograma indica posição, não área. O fomento corresponde ao valor contratado entre 2009 e 2024 pelo FSA, atribuído à UF da produtora proponente, e não ao local de realização da obra. Selecione uma UF — por clique ou pela lista — para ler os seus indicadores.
+        </p>
+        <SeletorMoeda moeda={moeda} aoMudar={setMoeda} />
+      </section>
+
+      <Estado carregando={carregando} erro={erro} vazio={!sel} vazioMsg="Nenhum dado territorial disponível. Verifique se a base FSA está instalada.">
+        {sel && (
+          <section style={{ display: "flex", flexWrap: "wrap", gap: "40px 56px", alignItems: "flex-start" }}>
+            <div style={{ flex: "0 1 788px", minWidth: 0, display: "flex", flexWrap: "wrap", gap: "36px 40px", alignItems: "flex-start" }}>
+              <MapaUF titulo="■ A · FOMENTO FSA ACUMULADO" subtitulo={unidade.toUpperCase()} ufs={ufs} ufSel={sel.sigla} aoSel={setUf}
+                texto={(u) => ({ curto: fmtNum(u.fomento_mi, 0), aria: `${fmtNum(u.fomento_mi, 1)} ${unidade} de fomento` })}
+                cor={(u) => ({ bg: RAMPA_FOMENTO[binFomento(u.fomento_mi)], fg: TEXTO_RAMPA[binFomento(u.fomento_mi)] })}
+                legenda={[["<10", 0], ["10–30", 1], ["30–100", 2], ["100–300", 3], ["≥300", 4]].map(([rotulo, i]) => ({ rotulo, cor: RAMPA_FOMENTO[i] }))} />
+              <MapaUF titulo="▲ B · SALAS POR 100 MIL HABITANTES" subtitulo={`MÉDIA NACIONAL ${fmtNum(d.media_nacional_salas_100mil, 2)}`} ufs={ufs} ufSel={sel.sigla} aoSel={setUf}
+                texto={(u) => (u.verificar ? { curto: "?", aria: "população a verificar" } : { curto: fmtNum(u.salas_por_100mil, 2), aria: `${fmtNum(u.salas_por_100mil, 2)} salas por 100 mil habitantes` })}
+                cor={(u) => (u.verificar ? { bg: HACHURA_VERIFICAR, fg: S.tinta } : { bg: RAMPA_SALAS[binSalas(u.salas_por_100mil)], fg: TEXTO_RAMPA[binSalas(u.salas_por_100mil)] })}
+                legenda={[["<1,0", 0], ["1,0–1,5", 1], ["1,5–2,0", 2], ["2,0–2,5", 3], ["≥2,5", 4]].map(([rotulo, i]) => ({ rotulo, cor: RAMPA_SALAS[i] })).concat([{ rotulo: "a verificar", cor: HACHURA_VERIFICAR }])} />
+            </div>
+
+            <div style={{ flex: "1 1 300px", minWidth: 0, display: "flex", flexDirection: "column", gap: 28 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <label htmlFor="uf-sel" style={{ fontFamily: FONTE_NUM, fontSize: 13, fontWeight: 600, letterSpacing: ".1em", color: S.mudo }}>UF LIDA</label>
+                <select id="uf-sel" value={sel.sigla} onChange={(e) => setUf(e.target.value)} style={{ minHeight: 48, border: `2px solid ${S.tinta}`, background: S.papel, padding: "0 12px", fontFamily: FONTE_UI, fontWeight: 600, fontSize: 16, color: S.tinta }}>
+                  {ufs.map((u) => <option key={u.sigla} value={u.sigla}>{u.sigla} · {u.nome}</option>)}
+                </select>
+              </div>
+
+              <div style={{ borderTop: `4px solid ${S.tinta}`, paddingTop: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 16 }}>
+                  <span style={{ fontWeight: 800, fontStretch: "62%", fontSize: 104, lineHeight: 0.82, color: S.sinal }}>{sel.sigla}</span>
+                  <span style={{ fontWeight: 700, fontSize: 20, lineHeight: 1.2 }}>{sel.nome}</span>
+                </div>
+                <dl style={{ margin: 0, display: "grid", gridTemplateColumns: "1fr auto", gap: "10px 16px", alignItems: "baseline" }}>
+                  {linhaDl(`Fomento FSA, ${unidade}`, fmtNum(sel.fomento_mi, 1))}
+                  {linhaDl("Parte do fomento com UF", `${fmtNum(sel.parte_fomento, 1)}%`)}
+                  {linhaDl("Contratos", fmtNum(sel.contratos, 0))}
+                  {linhaDl("Fomento por habitante, R$", fmtNum(sel.fomento_por_habitante, 1))}
+                  {linhaDl("Salas", fmtNum(sel.salas, 0))}
+                  {linhaDl("Parte das salas do país", `${fmtNum(sel.parte_salas, 1)}%`)}
+                  {linhaDl("Salas por 100 mil hab.", sel.verificar ? `${fmtNum(sel.salas_por_100mil, 2)} (a verificar)` : fmtNum(sel.salas_por_100mil, 2))}
+                </dl>
+                {sel.verificar && (
+                  <p role="note" style={{ margin: 0, border: `2px solid ${S.sinalTxt}`, padding: "12px 14px", fontSize: 14.5, lineHeight: 1.45 }}>
+                    <strong style={{ color: S.sinalTxt }}>A verificar.</strong> {sel.verificar}
+                  </p>
+                )}
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <h3 style={{ margin: 0, fontFamily: FONTE_NUM, fontSize: 13, fontWeight: 600, letterSpacing: ".1em", lineHeight: 1.4 }}>
+                  PARTE DAS SALAS × PARTE DO FOMENTO<br /><span style={{ color: S.mudo }}>ACIMA DA DIAGONAL: MAIS FOMENTO QUE SALAS</span>
+                </h3>
+                <svg viewBox="0 0 440 420" role="img" aria-label="Dispersão da parte das salas do país (eixo horizontal) contra a parte do fomento (eixo vertical), por UF." style={{ width: "100%", maxWidth: 440, height: "auto", display: "block" }}>
+                  <g stroke={S.linha} strokeWidth="1">
+                    {[0, 10, 20, 30].map((v) => <line key={`h${v}`} x1="48" y1={Y(v)} x2="428" y2={Y(v)} />)}
+                    {[10, 20, 30].map((v) => <line key={`v${v}`} x1={X(v)} y1="12" x2={X(v)} y2="388" />)}
+                  </g>
+                  <line x1="48" y1="388" x2="428" y2="12" stroke={S.sonar} strokeWidth="2" strokeDasharray="6 5" />
+                  <g fontFamily="'IBM Plex Mono',monospace" fontSize="12" fill={S.mudo}>
+                    {[0, 10, 20, 30].map((v) => <text key={`ty${v}`} x="40" y={Y(v) + 4} textAnchor="end">{v === 0 ? "0" : `${v}%`}</text>)}
+                    {[0, 10, 20, 30].map((v) => <text key={`tx${v}`} x={X(v)} y="408" textAnchor="middle">{v === 0 ? "0" : `${v}%`}</text>)}
+                  </g>
+                  {ufs.map((u) => (
+                    <circle key={u.sigla} cx={X(u.parte_salas)} cy={Y(u.parte_fomento)} r={u.sigla === sel.sigla ? 9 : 6} fill={u.sigla === sel.sigla ? S.sinal : S.tinta} stroke={S.papel} strokeWidth="2"
+                      onMouseEnter={() => setUf(u.sigla)} onClick={() => setUf(u.sigla)} style={{ cursor: "pointer" }} />
+                  ))}
+                  {ufs.filter((u) => u.sigla === sel.sigla || conc?.ufs.includes(u.sigla)).map((u) => (
+                    <text key={`l${u.sigla}`} x={X(u.parte_salas) + 11} y={Y(u.parte_fomento) - 8} fontFamily="'IBM Plex Mono',monospace" fontSize="13" fontWeight="600" fill={u.sigla === sel.sigla ? S.sinalTxt : S.tinta}>{u.sigla}</text>
+                  ))}
+                </svg>
+              </div>
+            </div>
+          </section>
+        )}
+
+        <section aria-labelledby="sec-terr-notas" style={{ display: "flex", flexWrap: "wrap", gap: "24px 56px", borderTop: `4px solid ${S.tinta}`, paddingTop: 24 }}>
+          <div style={{ flex: "0 0 240px" }}><TituloSecao id="sec-terr-notas">Ressalvas do mapa</TituloSecao></div>
+          <ul style={{ flex: "1 1 560px", margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 12, fontSize: 15.5, lineHeight: 1.5 }}>
+            {ressalvas.map((r) => <li key={r}>{r}</li>)}
+          </ul>
+        </section>
+      </Estado>
+    </div>
+  );
+}
+
+// ============ LIGAÇÕES: do contrato do FSA à obra e à bilheteria ============
+const CHAVES_COLUNAS = ["Tabela", "CNPJ", "CPB", "Nº contrato", "SALIC", "Município", "Ano"];
+// Verificado em 2026-11-02 sobre a fsa.db e o RIDAB@6c5e6ae (docs/RIDAB_INVENTARIO.md).
+const CHAVES = [
+  ["■ FSA · contratos", "● sim", null, "○ não", "○ não", "± só nome", "● DOU"],
+  ["■ FSA · ponte contrato↔CPB", "○ não", "● sim", "● sim", "○ não", "○ não", "○ não"],
+  ["■ FSA · bilheteria (conj. 28)", "● distribuidora", "● sim", "○ não", "○ não", "○ não", "● lançamento"],
+  ["▲ RIDAB · agentes econômicos", "● sim", "○ não", "○ não", "○ não", "● código IBGE", "● registro"],
+  ["▲ RIDAB · renúncia fiscal", "● sim", "○ não", "○ não", "● sim", "± só nome", "● aprovação"],
+  ["▲ RIDAB · obras com fomento indireto", "○ não", "● sim", "○ não", "● sim", "○ não", "○ não"],
+  ["▲ RIDAB · projetos FSA", "● sim", "○ não", "○ não", "○ não", "○ não", "● DOU"],
+];
+
+function Salto({ n, tipo, titulo, chave, fonte, children, ausente }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "20px 40px", padding: "28px 0", borderBottom: ausente ? `2px solid ${S.tinta}` : `1px solid ${S.linha}` }}>
+      <div style={{ flex: "0 0 300px", maxWidth: "100%", display: "flex", flexDirection: "column", gap: 6 }}>
+        <span style={{ fontFamily: FONTE_NUM, fontSize: 12.5, fontWeight: 600, letterSpacing: ".1em", color: ausente ? S.sinalTxt : S.mudo }}>SALTO {n} · {tipo}</span>
+        <h3 style={{ margin: 0, fontWeight: 800, fontStretch: "68%", textTransform: "uppercase", fontSize: 34, lineHeight: 1 }}>{titulo}</h3>
+        <span style={{ fontSize: 14.5 }}>{chave}</span>
+        {fonte && <span style={{ fontFamily: FONTE_NUM, fontSize: 12.5, color: S.mudo }}>{fonte}</span>}
+      </div>
+      <div style={{ flex: "1 1 560px", minWidth: 0, display: "flex", flexDirection: "column", gap: 14 }}>{children}</div>
+    </div>
+  );
+}
+
+function Segmento({ peso, fundo, cor, grande, pequeno, hachura }) {
+  return (
+    <div style={{ flex: `${peso} 1 0`, minWidth: 0, background: fundo, color: cor, display: "flex", flexDirection: "column", justifyContent: "center", padding: peso < 3 ? 0 : "0 16px", fontFamily: FONTE_NUM }}>
+      {grande && (hachura
+        ? <span style={{ alignSelf: "flex-start", background: S.papel, color: S.tinta, padding: "0 8px" }}><span style={{ fontSize: 22, fontWeight: 600 }}>{grande}</span> <span style={{ fontSize: 13 }}>{pequeno}</span></span>
+        : <><span style={{ fontSize: 22, fontWeight: 600 }}>{grande}</span><span style={{ fontSize: 13 }}>{pequeno}</span></>)}
+    </div>
+  );
+}
+
+function Ligacoes({ ir }) {
+  const { env, erro, carregando } = useEnvelope(() => SondaAPI.funil());
+  const d = env?.dados;
+  const seg = d?.salto_contrato_obra?.segmentos;
+  const ob = d?.salto_obra_bilheteria;
+  const metodos = d?.salto_contrato_obra?.metodos || [];
+  const nMetodo = (m) => metodos.filter((x) => x.metodo === m).reduce((s, x) => s + x.contratos, 0);
+  const porAno = d?.por_ano || [];
+  const maxChamada = Math.max(1, ...(d?.por_chamada || []).map((c) => c.sem_obra));
+  const ausente = d?.elo_ausente;
+  const f0 = (v) => fmtNum(v, 0);
+  const f1 = (v) => fmtNum(v, 1);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 56, fontFamily: FONTE_UI }}>
+      <section style={{ display: "flex", flexDirection: "column", gap: 16, borderBottom: `4px solid ${S.tinta}`, paddingBottom: 30 }}>
+        <span style={{ fontFamily: FONTE_NUM, fontSize: 13, fontWeight: 600, letterSpacing: ".14em", color: S.mudo }}>LIGAÇÕES · DO CONTRATO À BILHETERIA</span>
+        <h1 style={{ margin: 0, fontWeight: 800, fontStretch: "62%", textTransform: "uppercase", fontSize: "clamp(48px, 8vw, 104px)", lineHeight: 0.92, letterSpacing: "-.01em" }}>
+          {seg ? <><span style={{ color: S.sinal }}>{f0(seg.sem_obra.parte)}%</span> dos contratos do FSA não chegam a uma obra</> : "Ligações"}
+        </h1>
+        <p style={{ margin: 0, maxWidth: 860, fontSize: 16, lineHeight: 1.55 }}>
+          {d ? `${f0(d.contratos.total)} contratos, R$ ${fmtNum(d.contratos.valor_mi / 1000, 2)} bi correntes. ` : ""}
+          Cruzar bases é ligar a chave de uma à chave de outra, e o que não se liga constitui resultado: cada salto abaixo indica o que se liga, o que sobra e o que nenhuma base fecha. Os que sobram são tratados como achado, e não como descarte.
+        </p>
+      </section>
+
+      <Estado carregando={carregando} erro={erro} vazio={!d} vazioMsg="Nenhum dado disponível. Verifique se a base FSA está instalada.">
+        {d && (
+          <>
+            <section aria-label="Os três saltos" style={{ display: "flex", flexDirection: "column" }}>
+              <Salto n={1} tipo="FACTUAL" titulo="Contrato → Obra" chave="chave: nº do contrato (conj. 11) e, na falta dele, título único" fonte="FSA · fato_contrato_serie">
+                <div style={{ display: "flex", height: 76, border: `2px solid ${S.tinta}` }}>
+                  <Segmento peso={seg.seguro.parte} fundo={S.tinta} cor="#FFFFFF" grande={f0(seg.seguro.contratos)} pequeno={`ligados · ${f1(seg.seguro.parte)}%`} />
+                  <Segmento peso={Math.max(seg.ambiguo.parte, 0.4)} fundo={`repeating-linear-gradient(135deg, ${S.tinta} 0 2px, ${S.papel} 2px 5px)`} />
+                  <Segmento peso={seg.sem_obra.parte} fundo={S.sinal} cor={S.tinta} grande={f0(seg.sem_obra.contratos)} pequeno={`sem obra · ${f1(seg.sem_obra.parte)}%`} />
+                </div>
+                <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexWrap: "wrap", gap: "8px 28px", fontSize: 14.5 }}>
+                  <li style={{ display: "flex", alignItems: "center", gap: 8 }}><span aria-hidden="true" style={{ width: 14, height: 14, background: S.tinta, display: "inline-block" }} />vínculo seguro: R$ {fmtNum(seg.seguro.valor_mi, 1)} mi</li>
+                  <li style={{ display: "flex", alignItems: "center", gap: 8 }}><span aria-hidden="true" style={{ width: 14, height: 14, display: "inline-block", border: `1px solid ${S.tinta}`, boxSizing: "border-box", background: `repeating-linear-gradient(135deg, ${S.tinta} 0 2px, ${S.papel} 2px 5px)` }} />título ambíguo ({f0(seg.ambiguo.contratos)}): R$ {fmtNum(seg.ambiguo.valor_mi, 1)} mi</li>
+                  <li style={{ display: "flex", alignItems: "center", gap: 8 }}><span aria-hidden="true" style={{ width: 14, height: 14, background: S.sinal, display: "inline-block" }} />sem obra: R$ {fmtNum(seg.sem_obra.valor_mi, 1)} mi</li>
+                </ul>
+                <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.5 }}>
+                  {f0(nMetodo("num_contrato"))} contratos ligam pelo número do contrato (confiança 1,00) e {f0(nMetodo("titulo"))} pelo título único (0,95). Os {f0(seg.ambiguo.contratos)} de título ambíguo (0,60) ficam fora das análises até triagem manual. Valores em R$ correntes.
+                </p>
+              </Salto>
+
+              <Salto n={2} tipo="FACTUAL" titulo="Obra → Bilheteria" chave="chave: CPB (certificado da obra), conj. 28 da ANCINE" fonte="FSA · fato_bilheteria">
+                <div style={{ display: "flex", height: 76, border: `2px solid ${S.tinta}` }}>
+                  <Segmento peso={ob.parte_com_bilheteria} fundo={S.tinta} cor="#FFFFFF" grande={f0(ob.com_bilheteria)} pequeno={`com bilheteria · ${f1(ob.parte_com_bilheteria)}%`} />
+                  <Segmento peso={100 - ob.parte_com_bilheteria} fundo={HACHURA_VAZIO} grande={f0(ob.sem_bilheteria)} pequeno={`sem bilheteria · ${f1(100 - ob.parte_com_bilheteria)}%`} hachura />
+                </div>
+                <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.5 }}>
+                  De {f0(ob.obras_com_vinculo_seguro)} obras com vínculo seguro, {f0(ob.com_bilheteria)} constam no conj. 28, que só registra cinema. Hipótese para as demais: obras de TV ou VoD, ou ainda sem lançamento em sala. A Sonda não verificou essa hipótese.
+                </p>
+              </Salto>
+
+              <Salto n={3} tipo="ELO AUSENTE" titulo={`${ausente.de} → ${ausente.para}`} chave="chave: nenhuma base do catálogo fecha este elo" ausente>
+                <div style={{ border: `2px dashed ${S.sinalTxt}`, padding: "24px 28px", display: "flex", flexDirection: "column", gap: 16 }}>
+                  <span style={{ fontFamily: FONTE_NUM, fontSize: 12.5, fontWeight: 600, letterSpacing: ".12em", color: S.sinalTxt }}>PERGUNTA DE PESQUISA</span>
+                  <p style={{ margin: 0, fontSize: 28, lineHeight: 1.2, fontWeight: 700, letterSpacing: "-.01em" }}>{ausente.pergunta}</p>
+                  <p style={{ margin: 0, fontSize: 15.5, lineHeight: 1.5 }}>
+                    <strong>Candidato no catálogo:</strong> {ausente.candidato.base} <span style={{ fontFamily: FONTE_NUM, fontSize: 14 }}>{ausente.candidato.tabela}</span>, com {f0(ausente.candidato.linhas)} linhas de público por município, filme e ano. As chaves possíveis são {ausente.candidato.chaves.map((c, i) => <React.Fragment key={c}>{i > 0 ? " ou " : ""}<span style={{ fontFamily: FONTE_NUM, fontSize: 14 }}>{c}</span></React.Fragment>)}. {ausente.candidato.observacao}
+                  </p>
+                  <button type="button" onClick={() => ir("percurso")} style={{ alignSelf: "flex-start", minHeight: 44, padding: "0 20px", border: `2px solid ${S.tinta}`, background: S.papel, color: S.tinta, fontFamily: FONTE_UI, fontWeight: 700, fontSize: 15, cursor: "pointer" }}>Ver o contrato de base faltante no Percurso →</button>
+                </div>
+              </Salto>
+            </section>
+
+            <section style={{ display: "flex", flexWrap: "wrap", gap: "40px 56px", alignItems: "flex-start" }}>
+              <div style={{ flex: "1 1 560px", minWidth: 0, display: "flex", flexDirection: "column", gap: 14 }}>
+                <TituloSecao>Quem sobra, ano a ano</TituloSecao>
+                <p style={{ margin: 0, fontSize: 15.5, lineHeight: 1.5 }}>Parte dos contratos sem obra vinculada, por ano de publicação no DOU. Abaixo de cada ano, o número de contratos (n): nos primeiros anos são poucos, e a porcentagem oscila.</p>
+                <div role="img" aria-label={`Porcentagem de contratos sem obra, de ${porAno[0]?.ano} a ${porAno[porAno.length - 1]?.ano}.`} style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 260, borderBottom: `2px solid ${S.tinta}`, paddingTop: 8 }}>
+                  {porAno.map((a) => (
+                    <div key={a.ano} style={{ flex: "1 1 0", minWidth: 0, height: "100%", display: "flex", flexDirection: "column", justifyContent: "flex-end", alignItems: "center", gap: 4 }}>
+                      <span style={{ fontFamily: FONTE_NUM, fontSize: 12, fontWeight: 600, color: a.parte_sem_obra >= 60 ? S.sinalTxt : S.tinta }}>{f1(a.parte_sem_obra)}</span>
+                      <span style={{ width: "100%", height: `${(a.parte_sem_obra / 75) * 100}%`, background: a.parte_sem_obra >= 60 ? S.sinal : S.tinta, display: "block" }} />
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 4, fontFamily: FONTE_NUM, fontSize: 12, color: S.mudo, textAlign: "center" }}>
+                  {porAno.map((a) => <div key={a.ano} style={{ flex: "1 1 0", minWidth: 0, display: "flex", flexDirection: "column" }}><span style={{ color: S.tinta, fontWeight: 500 }}>{a.ano}</span><span>{a.contratos}</span></div>)}
+                </div>
+                <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.5 }}>
+                  Nos anos mais recentes, mais de 60% dos contratos ainda não têm obra vinculada. Hipótese: obras ainda não lançadas ou certificadas. A taxa de retorno do fomento, portanto, não pode ser lida sem considerar o ano do contrato.
+                </p>
+              </div>
+
+              <div style={{ flex: "1 1 440px", minWidth: 0, display: "flex", flexDirection: "column", gap: 32 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <TituloSecao>Onde estão os órfãos</TituloSecao>
+                  <p style={{ margin: 0, fontSize: 14.5 }}>Chamadas com mais contratos sem obra, e a parte que isso representa em cada uma:</p>
+                  <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 10 }}>
+                    {d.por_chamada.map((c) => (
+                      <li key={c.chamada} style={{ display: "grid", gridTemplateColumns: "140px 1fr 96px", gap: 12, alignItems: "center", fontSize: 14.5 }}>
+                        <span style={{ fontWeight: 600 }}>{c.chamada}</span>
+                        <span aria-hidden="true" style={{ display: "block", height: 18, width: `${(c.sem_obra / maxChamada) * 100}%`, background: S.tinta }} />
+                        <span style={{ fontFamily: FONTE_NUM, fontWeight: 600, textAlign: "right" }}>{f0(c.sem_obra)} · {f0(c.parte_sem_obra)}%</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <TituloSecao>Os maiores sem obra</TituloSecao>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 420, fontSize: 14.5 }}>
+                      <caption style={{ textAlign: "left", fontSize: 13.5, color: S.mudo, paddingBottom: 8 }}>Cinco maiores contratos sem obra, em R$ mi correntes.</caption>
+                      <thead><tr style={{ borderBottom: `2px solid ${S.tinta}` }}>{["Projeto", "Proponente", "UF", "Ano", "R$ mi"].map((h) => <th key={h} scope="col" style={{ textAlign: "left", padding: "8px 12px 8px 0", fontWeight: 700 }}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {d.maiores_sem_obra.map((m) => (
+                          <tr key={m.projeto} style={{ borderBottom: `1px solid ${S.linha}` }}>
+                            <th scope="row" style={{ textAlign: "left", fontWeight: 600, padding: "8px 12px 8px 0" }}>{m.projeto}</th>
+                            <td style={{ padding: "8px 12px 8px 0" }}>{m.proponente}</td>
+                            <td style={{ padding: "8px 12px 8px 0", fontFamily: FONTE_NUM }}>{m.uf || "sem UF"}</td>
+                            <td style={{ padding: "8px 12px 8px 0", fontFamily: FONTE_NUM }}>{m.ano}</td>
+                            <td style={{ padding: "8px 0", fontFamily: FONTE_NUM }}>{fmtNum(m.valor_mi, 1)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section aria-labelledby="sec-chaves" style={{ display: "flex", flexDirection: "column", gap: 20, borderTop: `4px solid ${S.tinta}`, paddingTop: 28 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: "8px 32px" }}>
+                <TituloSecao id="sec-chaves">Mapa de chaves</TituloSecao>
+                <p style={{ margin: 0, fontSize: 15.5, maxWidth: 780 }}>As chaves que cada tabela carrega definem o que pode ser cruzado com o quê. ● possui · ± parcial · ○ não possui. Verificado em 2026-11-02 (ver docs/RIDAB_INVENTARIO.md).</p>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 900, fontSize: 15 }}>
+                  <caption style={{ position: "absolute", left: -9999 }}>Chaves de junção presentes em cada tabela</caption>
+                  <thead><tr style={{ borderBottom: `2px solid ${S.tinta}` }}>{CHAVES_COLUNAS.map((h) => <th key={h} scope="col" style={{ textAlign: "left", padding: "10px 12px 10px 0", fontWeight: 700 }}>{h}</th>)}</tr></thead>
+                  <tbody style={{ fontFamily: FONTE_NUM, fontSize: 14 }}>
+                    {CHAVES.map((linha, i) => (
+                      <tr key={linha[0]} style={{ borderBottom: i === CHAVES.length - 1 ? `2px solid ${S.tinta}` : `1px solid ${S.linha}` }}>
+                        <th scope="row" style={{ textAlign: "left", fontFamily: FONTE_UI, fontSize: 15, fontWeight: 600, padding: "12px 12px 12px 0" }}>{linha[0]}</th>
+                        {linha.slice(1).map((c, j) => <td key={j} style={{ padding: "12px 12px 12px 0" }}>{c ?? `± ${fmtNum(seg.seguro.parte, 1)}%`}</td>)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "16px 40px" }}>
+                {[["91,5%", "dos contratos ganham o código IBGE do município via CNPJ (4.094 de 4.473, pelo cadastro atual de agentes do RIDAB)."],
+                  ["89,1%", "das obras com fomento indireto ganham o valor captado via SALIC (2.780 de 3.120 projetos distintos)."],
+                  [`${f1(seg.seguro.parte)}%`, "dos contratos do FSA ligam a uma obra. O RIDAB não traz CPB nos contratos e, isoladamente, não melhora essa taxa."]].map(([n, t]) => (
+                  <div key={n} style={{ flex: "1 1 280px", display: "flex", flexDirection: "column", gap: 4 }}>
+                    <span style={{ fontFamily: FONTE_NUM, fontSize: 34, fontWeight: 600, lineHeight: 1.05 }}>{n}</span>
+                    <span style={{ fontSize: 14.5, lineHeight: 1.45 }}>{t}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <section aria-labelledby="sec-lig-notas" style={{ display: "flex", flexWrap: "wrap", gap: "24px 56px", borderTop: `4px solid ${S.tinta}`, paddingTop: 24 }}>
+              <div style={{ flex: "0 0 240px" }}><TituloSecao id="sec-lig-notas">Ressalvas</TituloSecao></div>
+              <ul style={{ flex: "1 1 560px", margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 12, fontSize: 15.5, lineHeight: 1.5 }}>
+                {d.ressalvas.map((r) => <li key={r}>{r}</li>)}
+              </ul>
+            </section>
+          </>
+        )}
+      </Estado>
+    </div>
+  );
+}
+
 // ============ VISÃO 1: CATÁLOGO ============
 function Catalogo() {
   const { env, erro, carregando } = useEnvelope(() => SondaAPI.catalogo());
@@ -830,6 +1220,8 @@ function Metric({ label, v, cor }) {
 
 const VISOES = [
   { id: "painel", rotulo: "PAINEL", comp: Painel },
+  { id: "territorio", rotulo: "TERRITÓRIO", comp: Territorio },
+  { id: "ligacoes", rotulo: "LIGAÇÕES", comp: Ligacoes },
   { id: "catalogo", rotulo: "CATÁLOGO", comp: Catalogo },
   { id: "percurso", rotulo: "PERCURSO", comp: Percurso },
   { id: "trajetoria", rotulo: "TRAJETÓRIA", comp: Trajetoria },
@@ -840,7 +1232,7 @@ export default function SondaApp() {
   const [v, setV] = useState("painel");
   const Atual = VISOES.find((x) => x.id === v).comp;
   const ir = (id) => { setV(id); if (typeof window !== "undefined") window.scrollTo(0, 0); };
-  const larg = v === "painel" ? 1200 : 940;
+  const larg = ["painel", "territorio", "ligacoes"].includes(v) ? 1280 : 940;
   return (
     <div style={{ minHeight: "100vh", background: S.papel, color: S.tinta, fontFamily: "'Archivo',sans-serif" }}>
       <style>{`

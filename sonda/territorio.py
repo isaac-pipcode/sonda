@@ -35,8 +35,9 @@ def _verificar(uf: str, pop_uf: int, pop_municipios: Optional[int]) -> Optional[
     """Motivo da suspeita sobre a população do UF, ou None. Regra detectável: o total do
     UF não pode ser menor que a soma dos seus municípios com sala, na mesma base."""
     if pop_municipios is not None and pop_uf < pop_municipios:
-        return (f"A população do UF ({pop_uf:,}) é menor que a soma dos seus municípios com sala "
-                f"({pop_municipios:,}), o que é impossível; parece trocada com a de Roraima.").replace(",", ".")
+        milhar = lambda n: f"{n:,}".replace(",", ".")  # noqa: E731
+        return (f"A população do UF ({milhar(pop_uf)}) é menor que a soma dos seus municípios com sala "
+                f"({milhar(pop_municipios)}), o que é impossível; parece trocada com a de Roraima.")
     return VERIFICACAO_MANUAL.get(uf)
 
 
