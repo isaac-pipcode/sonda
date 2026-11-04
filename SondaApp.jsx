@@ -605,7 +605,7 @@ function Ligacoes({ ir }) {
           {seg ? <><span style={{ color: S.sinal }}>{f0(seg.sem_obra.parte)}%</span> dos contratos do FSA não chegam a uma obra</> : "Ligações"}
         </h1>
         <p style={{ margin: 0, maxWidth: 860, fontSize: 16, lineHeight: 1.55 }}>
-          {d ? `${f0(d.contratos.total)} contratos, R$ ${fmtNum(d.contratos.valor_mi / 1000, 2)} bi correntes. ` : ""}
+          {d?.contratos ? `${f0(d.contratos.total)} contratos, R$ ${fmtNum(d.contratos.valor_mi / 1000, 2)} bi correntes. ` : ""}
           Cruzar bases é ligar a chave de uma à chave de outra, e o que não se liga constitui resultado: cada salto abaixo indica o que se liga, o que sobra e o que nenhuma base fecha. Os que sobram são tratados como achado, e não como descarte.
         </p>
       </section>
@@ -1487,10 +1487,25 @@ const VISOES = [
   { id: "cruzamentos", rotulo: "CRUZAMENTOS", comp: Cruzamentos },
 ];
 
+// hash desconhecido ou ausente cai no Painel, nunca numa tela vazia.
+function visaoDoHash() {
+  const id = (typeof window !== "undefined" ? window.location.hash : "").replace(/^#\/?/, "");
+  return VISOES.some((x) => x.id === id) ? id : "painel";
+}
+
 export default function SondaApp() {
-  const [v, setV] = useState("painel");
+  // a visão ativa vive no hash da URL (#/percurso): link compartilhável e botão voltar funcional.
+  const [v, setV] = useState(visaoDoHash);
+  useEffect(() => {
+    const aoMudar = () => setV(visaoDoHash());
+    window.addEventListener("hashchange", aoMudar);
+    return () => window.removeEventListener("hashchange", aoMudar);
+  }, []);
   const Atual = VISOES.find((x) => x.id === v).comp;
-  const ir = (id) => { setV(id); if (typeof window !== "undefined") window.scrollTo(0, 0); };
+  const ir = (id) => {
+    window.location.hash = `/${id}`; // dispara hashchange, que atualiza `v`
+    window.scrollTo?.(0, 0);
+  };
   const larg = ["painel", "territorio", "ligacoes", "catalogo", "trajetoria", "percurso", "cruzamentos"].includes(v) ? 1280 : 940;
   return (
     <div style={{ minHeight: "100vh", background: S.papel, color: S.tinta, fontFamily: "'Archivo',sans-serif" }}>
