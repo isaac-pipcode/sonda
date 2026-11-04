@@ -1,4 +1,4 @@
-import React, { Component, useState, useEffect, useCallback } from "react";
+import React, { Component, useState, useEffect, useCallback, useRef } from "react";
 import { SondaAPI } from "./sonda_api_client";
 
 /*
@@ -99,7 +99,7 @@ function useEnvelope(fn, deps = []) {
   const [carregando, setCarregando] = useState(true);
   const recarregar = useCallback(() => {
     setCarregando(true); setErro(null);
-    Promise.resolve().then(fn).then(setEnv).catch((e) => setErro(mensagem(e))).finally(() => setCarregando(false));
+    return Promise.resolve().then(fn).then(setEnv).catch((e) => setErro(mensagem(e))).finally(() => setCarregando(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   useEffect(() => { recarregar(); }, [recarregar]);
@@ -859,197 +859,245 @@ function Catalogo({ ir }) {
   );
 }
 
-// ============ VISÃO 2: PERCURSO (rede de caminhos — lida do backend) ============
-// Layout por id de nó; a estrutura (nós/arestas) e os achados vêm da API.
-const LAYOUT = {
-  filme:  { x: 40,  y: 60,  w: 170, h: 54 },
-  salas:  { x: 320, y: 60,  w: 160, h: 54 },
-  preco:  { x: 470, y: 210, w: 170, h: 54 },
-  origem: { x: 60,  y: 300, w: 190, h: 56 },
+// ============ ações e blocos comuns (Percurso e Cruzamentos) ============
+const BTN = { minHeight: 44, padding: "0 20px", border: `2px solid ${S.tinta}`, background: S.papel, color: S.tinta, fontFamily: FONTE_UI, fontWeight: 700, fontSize: 15, cursor: "pointer" };
+function Btn({ forte, ocupado, children, ...p }) {
+  return (
+    <button type="button" disabled={ocupado} {...p}
+      style={{ ...BTN, ...(forte ? { background: S.tinta, color: S.papel } : {}), opacity: ocupado ? 0.55 : 1, cursor: ocupado ? "wait" : "pointer" }}>
+      {children}
+    </button>
+  );
+}
+const fmtQuando = (iso) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? String(iso) : `${d.toLocaleDateString("pt-BR")}, ${d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
 };
-const _fallbackLayout = (i) => ({ x: 40 + (i % 3) * 220, y: 60 + Math.floor(i / 3) * 110, w: 175, h: 54 });
-const corTipo = (t) => (t === "derivado" ? S.sonar : S.sinal);
+const plural = (n, um, varios) => `${fmtNum(n, 0)} ${n === 1 ? um : varios}`;
+
+function CabecalhoVisao({ kicker, titulo, texto }) {
+  return (
+    <section style={{ display: "flex", flexDirection: "column", gap: 16, borderBottom: `4px solid ${S.tinta}`, paddingBottom: 30 }}>
+      <span style={{ fontFamily: FONTE_NUM, fontSize: 13, fontWeight: 600, letterSpacing: ".14em", color: S.mudo }}>{kicker}</span>
+      <h1 style={{ margin: 0, fontWeight: 800, fontStretch: "62%", textTransform: "uppercase", fontSize: "clamp(44px, 7vw, 88px)", lineHeight: 0.95, letterSpacing: "-.01em" }}>{titulo}</h1>
+      <p style={{ margin: 0, maxWidth: 860, fontSize: 16, lineHeight: 1.55 }}>{texto}</p>
+    </section>
+  );
+}
+
+// confirmação antes de gravar um ponto permanente na série (decisão 6: append-only).
+function Confirmacao({ id, titulo, children, rotuloConfirmar, ocupado, aoConfirmar, aoCancelar }) {
+  return (
+    <div role="group" aria-labelledby={id} style={{ border: `2px solid ${S.tinta}`, background: S.painel, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+      <strong id={id} style={{ fontSize: 16 }}>{titulo}</strong>
+      <div style={{ fontSize: 15, lineHeight: 1.55, display: "flex", flexDirection: "column", gap: 8 }}>{children}</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+        <Btn forte ocupado={ocupado} onClick={aoConfirmar}>{ocupado ? "Registrando…" : rotuloConfirmar}</Btn>
+        <Btn ocupado={ocupado} onClick={aoCancelar}>Cancelar</Btn>
+      </div>
+    </div>
+  );
+}
+
+// amostra de órfãos: o que não liga é achado, nunca filtro (porosidade 4).
+function AmostraOrfaos({ itens, total }) {
+  if (!itens.length) return null;
+  return (
+    <details style={{ fontSize: 14.5 }}>
+      <summary style={{ cursor: "pointer", minHeight: 32, color: S.sinalTxt, fontWeight: 700 }}>
+        Órfãos: {itens.length} de {fmtNum(total, 0)} (achado, não filtro)
+      </summary>
+      <ul style={{ margin: "8px 0 0", padding: "0 0 0 20px", fontFamily: FONTE_NUM, fontSize: 13, lineHeight: 1.7, color: S.mudo }}>
+        {itens.map((o, i) => <li key={i}>{o.rotulo ?? "(sem rótulo)"} <span style={{ color: S.mudo }}>· {o.lado}</span></li>)}
+      </ul>
+    </details>
+  );
+}
+
+function Contrato({ contrato }) {
+  if (!contrato) return null;
+  return (
+    <div style={{ border: `2px dashed ${S.sinalTxt}`, padding: "16px 18px", display: "flex", flexDirection: "column", gap: 8 }}>
+      <span style={{ fontFamily: FONTE_NUM, fontSize: 12.5, fontWeight: 600, letterSpacing: ".1em", color: S.sinalTxt }}>CONTRATO DE BASE FALTANTE</span>
+      <p style={{ margin: 0, fontSize: 17, fontWeight: 700, lineHeight: 1.4 }}>{contrato.pergunta_de_pesquisa}</p>
+      {contrato.eixo_de_ligacao_hipotese && (
+        <>
+          <span style={{ fontSize: 14, color: S.mudo }}>Eixo de ligação ({contrato.eixo_de_ligacao_hipotese.eixo}), hipóteses a confirmar:</span>
+          <ul style={{ margin: 0, paddingLeft: 20, fontSize: 14.5, lineHeight: 1.6 }}>
+            {(contrato.eixo_de_ligacao_hipotese.hipoteses || []).map((h, i) => <li key={i}>{h}</li>)}
+          </ul>
+        </>
+      )}
+      <span style={{ fontSize: 14, color: S.mudo }}>Retenção: {contrato.regime_retencao}</span>
+    </div>
+  );
+}
+
+// ============ PERCURSO: a rede de caminhos como lista navegável de saltos ============
+const GLIFO = { factual: "●", derivado: "◇", ausente: "┄" };
+const NOME_TIPO = { factual: "factual", derivado: "derivado", ausente: "ausente" };
 
 function Percurso() {
-  const [sel, setSel] = useState(null);
+  const [pid, setPid] = useState(null);
+  const [selIdx, setSelIdx] = useState(0);
+  const [confirmando, setConfirmando] = useState(false);
   const [ocupado, setOcupado] = useState(false);
   const [falha, setFalha] = useState(null);
+  const [aviso, setAviso] = useState(null);
 
-  const { env: lista } = useEnvelope(() => SondaAPI.percursos());
-  const pid = lista?.dados?.[0]?.id;
-  const { env: det, erro: erroDet, carregando: carDet } = useEnvelope(
-    () => (pid ? SondaAPI.percurso(pid) : null), [pid]);
-  const { env: ult, carregando: carUlt, recarregar } = useEnvelope(
-    () => (pid ? SondaAPI.percursoUltima(pid) : null), [pid]);
+  const { env: lista, erro: erroLista, carregando: carLista } = useEnvelope(() => SondaAPI.percursos());
+  const percursos = lista?.dados || [];
+  const id = pid || percursos[0]?.id;
+  const { env: det, erro: erroDet, carregando: carDet, recarregar: recDet } = useEnvelope(
+    () => (id ? SondaAPI.percurso(id) : null), [id]);
+  const { env: ult, erro: erroUlt, carregando: carUlt, recarregar: recUlt } = useEnvelope(
+    () => (id ? SondaAPI.percursoUltima(id) : null), [id]);
 
-  const definicao = det?.dados?.definicao;
-  const saltos = ult?.dados?.saltos || [];
-  const resumo = ult?.dados?.resumo;
-  const saltoDe = (de, para) => saltos.find((s) => s.de === de && s.para === para);
+  const p = det?.dados;
+  const nos = Object.fromEntries((p?.definicao?.nos || []).map((n) => [n.id, n]));
+  const arestas = p?.definicao?.arestas || [];
+  const travessia = ult?.dados;
+  const saltos = travessia?.saltos || [];
+  const resumo = travessia?.resumo;
+  const itens = arestas.map((a) => {
+    const s = saltos.find((x) => x.de === a.de && x.para === a.para);
+    const tipo = s?.tipo || a.tipo || nos[a.para]?.tipo || "factual";
+    return { a, s, tipo, de: nos[a.de], para: nos[a.para] };
+  });
+  const atual = itens[Math.min(selIdx, itens.length - 1)];
+  const ultimaSerie = p?.serie?.[p.serie.length - 1];
 
-  const reexecutar = async () => {
-    if (!pid) return;
-    setOcupado(true); setFalha(null);
-    try { await SondaAPI.executarPercurso(pid); recarregar(); }
-    catch (e) { setFalha(`não foi possível re-executar a travessia — ${mensagem(e)}`); }
+  const escolher = (novo) => { setPid(novo); setSelIdx(0); setConfirmando(false); setFalha(null); setAviso(null); };
+  const registrar = async () => {
+    setOcupado(true); setFalha(null); setAviso(null);
+    try {
+      await SondaAPI.executarPercurso(id);
+      setConfirmando(false);
+      await Promise.all([recDet(), recUlt()]);
+      setAviso("Travessia registrada: um novo ponto foi acrescentado à série do percurso.");
+    } catch (e) { setFalha(`Não foi possível registrar a travessia: ${mensagem(e)}`); }
     finally { setOcupado(false); }
   };
 
-  const nos = definicao?.nos || [];
-  const pos = {}; nos.forEach((n, i) => { pos[n.id] = { ...(LAYOUT[n.id] || _fallbackLayout(i)), ...n }; });
-  const centro = (id) => ({ x: pos[id].x + pos[id].w / 2, y: pos[id].y + pos[id].h / 2 });
-
   return (
-    <div>
-      <Lead n="02" titulo="Percurso" sub="O caminho do dado é o objeto — travessia multi-salto lida do backend. Clique no elo tracejado: a ausência é um gerador." />
+    <div style={{ display: "flex", flexDirection: "column", gap: 32, fontFamily: FONTE_UI }}>
+      <CabecalhoVisao kicker="PERCURSO · REDE DE CAMINHOS"
+        titulo={<>O caminho do dado é <span style={{ color: S.sinal }}>o objeto</span></>}
+        texto="Um percurso encadeia saltos entre bases. Cada salto é factual (ligação medida entre registros), derivado (dado inferido, não primário) ou ausente (nenhuma base do catálogo fecha o elo, o que gera um contrato de base faltante). A travessia mede os saltos factuais e registra o resultado como um ponto datado e permanente." />
 
-      <div style={{ display: "flex", gap: 10, alignItems: "center", margin: "16px 0 4px", flexWrap: "wrap" }}>
-        <Botao cor={S.sinalTxt} onClick={reexecutar} ocupado={ocupado}>▶ re-executar travessia</Botao>
-        {resumo && (
-          <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, color: S.mudo }}>
-            <span style={{ color: S.sonar }}>{resumo.ligados_total} ligados</span> ·{" "}
-            <span style={{ color: S.sinalTxt }}>{resumo.orfaos_total} órfãos</span> ·{" "}
-            <span style={{ color: S.sinalTxt }}>{resumo.n_elos_ausentes} elo(s) ausente(s)</span> ·{" "}
-            {resumo.n_derivados} derivado(s)
-          </span>
+      <Estado carregando={(carLista || carDet || carUlt) && !p} erro={erroLista || erroDet || erroUlt} vazio={percursos.length === 0} vazioMsg="Nenhum percurso registrado: execute a ingestão (seed.py).">
+        {p && (
+          <>
+            <section aria-labelledby="sec-perc" style={{ display: "flex", flexWrap: "wrap", gap: "16px 32px", alignItems: "flex-end", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+                <TituloSecao id="sec-perc">{p.nome}</TituloSecao>
+                <span style={{ fontFamily: FONTE_NUM, fontSize: 13, color: S.mudo }}>
+                  regra {p.versao_regra} · assinado por <span style={{ color: S.tinta }}>{p.autor}</span> · {plural(p.serie.length, "travessia registrada", "travessias registradas")}
+                </span>
+                {percursos.length > 1 && (
+                  <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 15, marginTop: 6 }}>
+                    Percurso
+                    <select value={id} onChange={(e) => escolher(e.target.value)} style={{ minHeight: 44, fontFamily: FONTE_UI, fontSize: 15, padding: "0 10px", border: `2px solid ${S.tinta}`, background: S.papel }}>
+                      {percursos.map((x) => <option key={x.id} value={x.id}>{x.nome}</option>)}
+                    </select>
+                  </label>
+                )}
+              </div>
+              <Btn forte aria-expanded={confirmando} onClick={() => setConfirmando((v) => !v)}>Registrar nova travessia</Btn>
+            </section>
+
+            {confirmando && (
+              <Confirmacao id="conf-perc" titulo="Registrar uma nova travessia?" rotuloConfirmar="Confirmar e registrar" ocupado={ocupado}
+                aoConfirmar={registrar} aoCancelar={() => setConfirmando(false)}>
+                <span>A travessia reexecuta todos os saltos factuais e acrescenta um ponto <strong>permanente</strong> à série do percurso. O registro não pode ser apagado.</span>
+                <span style={{ color: S.mudo }}>
+                  {ultimaSerie
+                    ? `Última travessia: ${fmtQuando(ultimaSerie.data)}, com ${fmtNum(ultimaSerie.ligados_total, 0)} ligados e ${fmtNum(ultimaSerie.orfaos_total, 0)} órfãos. Se as fontes não mudaram desde então, o novo ponto repetirá esse resultado.`
+                    : "Este percurso ainda não foi atravessado."}
+                </span>
+              </Confirmacao>
+            )}
+            <Falha erro={falha} />
+            <p role="status" style={{ margin: 0, fontSize: 15, color: S.sonar, fontWeight: 600 }}>{aviso}</p>
+
+            {resumo && (
+              <p style={{ margin: 0, fontSize: 15.5, lineHeight: 1.6 }}>
+                Travessia de {fmtQuando(travessia.data)}: <strong>{fmtNum(resumo.ligados_total, 0)}</strong> ligados, <strong style={{ color: S.sinalTxt }}>{fmtNum(resumo.orfaos_total, 0)}</strong> órfãos,{" "}
+                {plural(resumo.n_derivados, "salto derivado", "saltos derivados")} e {plural(resumo.n_elos_ausentes, "elo ausente", "elos ausentes")}.
+              </p>
+            )}
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "24px 40px", alignItems: "flex-start" }}>
+              <div style={{ flex: "1 1 380px", minWidth: 0 }}>
+                <p style={{ margin: "0 0 10px", fontSize: 14, color: S.mudo }}>
+                  <span aria-hidden="true">●</span> factual · <span aria-hidden="true">◇</span> derivado · <span aria-hidden="true">┄</span> ausente
+                </p>
+                <ol aria-label="Saltos do percurso" style={{ margin: 0, padding: 0, listStyle: "none", borderTop: `2px solid ${S.tinta}` }}>
+                  {itens.map((it, i) => {
+                    const on = atual === it;
+                    const resumoSalto = it.tipo === "factual" && it.s
+                      ? `${fmtNum(it.s.ligados, 0)} ligados · ${fmtNum(it.s.orfaos_esquerda + it.s.orfaos_direita, 0)} órfãos`
+                      : it.tipo === "ausente" ? "elo ausente" : it.tipo === "derivado" ? "inferido" : "ainda não atravessado";
+                    return (
+                      <li key={i} style={{ borderBottom: `1px solid ${S.linha}` }}>
+                        <button type="button" aria-pressed={on} onClick={() => setSelIdx(i)}
+                          style={{ width: "100%", minHeight: 64, display: "flex", alignItems: "center", gap: 14, textAlign: "left", padding: "10px 12px", border: "none", outline: on ? `3px solid ${S.tinta}` : "none", outlineOffset: -3, background: on ? S.painel : S.papel, color: S.tinta, fontFamily: FONTE_UI, cursor: "pointer" }}>
+                          <span aria-hidden="true" style={{ fontFamily: FONTE_NUM, fontSize: 22, color: it.tipo === "ausente" ? S.sinalTxt : S.sonar, width: 24, textAlign: "center" }}>{GLIFO[it.tipo]}</span>
+                          <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                            <span style={{ fontWeight: 700, fontSize: 16 }}>{it.de?.rotulo || it.a.de} → {it.para?.rotulo || it.a.para}</span>
+                            <span style={{ fontSize: 14, color: S.mudo }}>{NOME_TIPO[it.tipo]} · {resumoSalto}</span>
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </div>
+
+              <aside aria-label="Detalhe do salto" style={{ flex: "1 1 360px", minWidth: 0, display: "flex", flexDirection: "column", gap: 14 }}>
+                {atual ? <DetalheSalto it={atual} /> : <p style={{ margin: 0, color: S.mudo }}>Este percurso não define saltos.</p>}
+              </aside>
+            </div>
+          </>
         )}
-      </div>
-      <Falha erro={falha} />
-
-      <Estado carregando={carDet || carUlt} erro={erroDet} vazio={!definicao}>
-        <div style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 18, marginTop: 12, alignItems: "start" }}>
-          <div style={{ background: S.papel, border: `1px solid ${S.linha}`, borderRadius: 8, padding: 6 }}>
-            <svg viewBox="0 0 680 410" style={{ width: "100%", height: "auto" }}>
-              <defs>
-                <marker id="au" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                  <path d="M2 2 L8 5 L2 8" fill="none" stroke="context-stroke" strokeWidth="1.6" />
-                </marker>
-              </defs>
-              <line x1="24" y1="20" x2="24" y2="396" stroke={S.mudo} strokeWidth="1.2" strokeDasharray="3 5" opacity="0.4" />
-              {(definicao?.arestas || []).map((a, i) => {
-                if (!pos[a.de] || !pos[a.para]) return null;
-                const e1 = centro(a.de), e2 = centro(a.para);
-                const s = saltoDe(a.de, a.para);
-                const tipo = s?.tipo || a.tipo || "factual";
-                const col = corTipo(tipo);
-                const on = sel === `e${i}`;
-                const mx = (e1.x + e2.x) / 2, my = (e1.y + e2.y) / 2;
-                return (
-                  <g key={i} onClick={() => setSel(tipo === "ausente" ? a.para : `e${i}`)} style={{ cursor: "pointer" }}>
-                    <line x1={e1.x} y1={e1.y} x2={e2.x} y2={e2.y} stroke="transparent" strokeWidth="16" />
-                    <line x1={e1.x} y1={e1.y} x2={e2.x} y2={e2.y} stroke={col} strokeWidth={on ? 3.5 : 2}
-                      strokeDasharray={tipo === "ausente" ? "6 5" : "0"} markerEnd="url(#au)" opacity={on ? 1 : 0.7} />
-                    {tipo === "factual" && s && (
-                      <text x={mx} y={my - 6} textAnchor="middle" fontSize="10" fill={S.sonar} fontFamily="'IBM Plex Mono',monospace">
-                        {s.ligados} ligados
-                      </text>
-                    )}
-                  </g>
-                );
-              })}
-              {nos.map((no) => {
-                const p = pos[no.id];
-                const col = no.tipo === "derivado" ? S.sonar : S.sinal;
-                const on = sel === no.id;
-                return (
-                  <g key={no.id} onClick={() => setSel(no.id)} style={{ cursor: "pointer" }}>
-                    <rect x={p.x} y={p.y} width={p.w} height={p.h} rx={7}
-                      fill={on ? S.painel : S.papel} stroke={col}
-                      strokeWidth={on ? 3.5 : no.tipo === "ausente" ? 1.5 : 1.5}
-                      strokeDasharray={no.tipo === "ausente" ? "6 5" : "0"} />
-                    <text x={p.x + p.w / 2} y={p.y + p.h / 2 - 5} textAnchor="middle" fontSize="13" fontWeight="700"
-                      fill={S.tinta} fontFamily="'Archivo',sans-serif">{no.rotulo}</text>
-                    <text x={p.x + p.w / 2} y={p.y + p.h / 2 + 12} textAnchor="middle" fontSize="10"
-                      fill={S.mudo} fontFamily="'IBM Plex Mono',monospace">{no.tipo}</text>
-                  </g>
-                );
-              })}
-            </svg>
-          </div>
-          <PainelPercurso sel={sel} nos={pos} saltos={saltos} arestas={definicao?.arestas || []} />
-        </div>
       </Estado>
     </div>
   );
 }
 
-function PainelPercurso({ sel, nos, saltos, arestas }) {
-  // seleção de um nó ausente → contrato real (do salto ausente da travessia).
-  const noSel = sel && nos[sel];
-  if (noSel && noSel.tipo === "ausente") {
-    const salto = saltos.find((s) => s.para === sel && s.tipo === "ausente");
-    const contrato = salto?.contrato;
-    return (
-      <div style={{ background: S.papel, border: `1.5px dashed ${S.sinal}`, borderRadius: 8, padding: "18px 18px" }}>
-        <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, fontWeight: 700, color: S.sinalTxt, letterSpacing: ".05em" }}>
-          ⚠ ELO AUSENTE · CONTRATO DE BASE FALTANTE
-        </div>
-        {!contrato && <Mono cor={S.mudo}>execute a travessia para gerar o contrato</Mono>}
-        {contrato && (
-          <>
-            <div style={{ marginTop: 14, padding: "13px 14px", background: "rgba(255,61,46,.06)", borderLeft: `3px solid ${S.sinal}`, borderRadius: 3 }}>
-              <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: S.sinalTxt, fontWeight: 700, marginBottom: 6 }}>PERGUNTA DE PESQUISA</div>
-              <div style={{ fontSize: 17, fontWeight: 600, color: S.tinta, lineHeight: 1.4, fontFamily: "'Archivo',sans-serif" }}>
-                {contrato.pergunta_de_pesquisa}
-              </div>
-            </div>
-            <div style={{ marginTop: 12, fontFamily: "'IBM Plex Mono',monospace", fontSize: 10, color: S.mudo, fontWeight: 700 }}>
-              EIXO DE LIGAÇÃO ({contrato.eixo_de_ligacao_hipotese?.eixo}) — hipótese a confirmar
-            </div>
-            {(contrato.eixo_de_ligacao_hipotese?.hipoteses || []).map((h, i) => (
-              <div key={i} style={{ fontSize: 12, color: S.mudo, fontFamily: "'IBM Plex Mono',monospace", padding: "4px 0" }}>
-                <span style={{ color: S.sinalTxt }}>?</span> {h}
-              </div>
-            ))}
-            <div style={{ marginTop: 10, fontFamily: "'IBM Plex Mono',monospace", fontSize: 10.5, color: S.mudo }}>
-              retenção: {contrato.regime_retencao}
-            </div>
-          </>
-        )}
-      </div>
-    );
-  }
-
-  // seleção de aresta factual → métricas reais + amostra de órfãos (achado).
-  let salto = null;
-  if (typeof sel === "string" && sel.startsWith("e")) {
-    const a = arestas[Number(sel.slice(1))];
-    if (a) salto = saltos.find((s) => s.de === a.de && s.para === a.para);
-  }
+function DetalheSalto({ it }) {
+  const { s, tipo, de, para, a } = it;
+  const titulo = `${de?.rotulo || a.de} → ${para?.rotulo || a.para}`;
+  const orfaos = s ? [
+    ...(s.amostra_orfaos_esquerda || []).slice(0, 5).map((o) => ({ ...o, lado: de?.rotulo || "esquerda" })),
+    ...(s.amostra_orfaos_direita || []).slice(0, 5).map((o) => ({ ...o, lado: para?.rotulo || "direita" })),
+  ] : [];
   return (
-    <div style={{ background: S.papel, border: `1px solid ${S.linha}`, borderRadius: 8, padding: "18px 18px", minHeight: 120 }}>
-      {!noSel && !salto && <div style={{ color: S.mudo, fontSize: 14, fontFamily: "'Archivo',sans-serif" }}>Selecione um nó ou aresta para inspecionar a articulação. O elo tracejado abre o contrato da base faltante.</div>}
-      {noSel && noSel.tipo !== "ausente" && (
-        <div>
-          <div style={{ fontSize: 18, fontWeight: 700, color: S.tinta, fontFamily: "'Archivo',sans-serif" }}>{noSel.rotulo}</div>
-          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: S.mudo, marginTop: 3 }}>
-            {noSel.tipo === "derivado" ? "nó derivado · não é dado primário" : "nó factual · registro nativo"}
-          </div>
-          {noSel.derivacao && (
-            <div style={{ marginTop: 12, padding: "10px 12px", background: S.painel, borderRadius: 4, fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5, color: S.mudo }}>
-              ↳ {noSel.derivacao}
-            </div>
-          )}
-        </div>
+    <>
+      <h3 style={{ margin: 0, fontWeight: 800, fontStretch: "68%", textTransform: "uppercase", fontSize: 28, lineHeight: 1.05 }}>{titulo}</h3>
+      <span style={{ fontFamily: FONTE_NUM, fontSize: 13, color: S.mudo }}>salto {NOME_TIPO[tipo]}{a.eixo ? ` · eixo ${a.eixo}` : ""}</span>
+      {tipo === "factual" && !s && <p style={{ margin: 0, fontSize: 15 }}>Este salto ainda não foi atravessado. Registre uma travessia para medi-lo.</p>}
+      {tipo === "factual" && s && (
+        <>
+          <p style={{ margin: 0, fontSize: 15.5, lineHeight: 1.55 }}>
+            <strong style={{ fontFamily: FONTE_NUM, fontSize: 26 }}>{fmtNum(s.ligados, 0)}</strong> ligados ·{" "}
+            <strong style={{ fontFamily: FONTE_NUM, fontSize: 26, color: S.sinalTxt }}>{fmtNum(s.orfaos_esquerda + s.orfaos_direita, 0)}</strong> órfãos
+            <br /><span style={{ color: S.mudo, fontSize: 14 }}>{fmtNum(s.orfaos_esquerda, 0)} sem par à esquerda, {fmtNum(s.orfaos_direita, 0)} à direita. O que não liga é achado, não é descartado.</span>
+          </p>
+          <AmostraOrfaos itens={orfaos} total={s.orfaos_esquerda + s.orfaos_direita} />
+        </>
       )}
-      {salto && salto.tipo === "factual" && (
-        <div>
-          <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: S.tinta }}>
-            {salto.rotulo_de} → {salto.rotulo_para} · eixo {salto.eixo}
-          </div>
-          <div style={{ marginTop: 8, fontFamily: "'IBM Plex Mono',monospace", fontSize: 12 }}>
-            <span style={{ color: S.sonar }}>{salto.ligados} ligados</span> ·{" "}
-            <span style={{ color: S.sinalTxt }}>{salto.orfaos_esquerda + salto.orfaos_direita} órfãos</span>
-            <span style={{ color: S.mudo }}> (achado, não escondido)</span>
-          </div>
-          {(salto.amostra_orfaos_esquerda || []).slice(0, 5).map((o, i) => (
-            <div key={i} style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: S.mudo, paddingTop: 3 }}>
-              <span style={{ color: S.sinalTxt }}>órfão</span> {o.rotulo}
-            </div>
-          ))}
-        </div>
+      {tipo === "derivado" && (
+        <p style={{ margin: 0, fontSize: 15.5, lineHeight: 1.55 }}>
+          O nó <strong>{para?.rotulo}</strong> é derivado: não é dado primário, é inferência.
+          {(s?.derivacao || para?.derivacao) && <><br /><span style={{ color: S.mudo }}>Derivação: {s?.derivacao || para?.derivacao}</span></>}
+        </p>
       )}
-    </div>
+      {tipo === "ausente" && (
+        s?.contrato ? <Contrato contrato={s.contrato} />
+          : <p style={{ margin: 0, fontSize: 15 }}>Elo ausente. Registre uma travessia para gerar o contrato de base faltante.</p>
+      )}
+    </>
   );
 }
 
@@ -1196,100 +1244,224 @@ function Trajetoria({ ir }) {
   );
 }
 
-// ============ VISÃO 4: CRUZAMENTOS ============
+// ============ CRUZAMENTOS: receitas persistentes, assinadas, versionadas, bifurcáveis ============
+const REGRAS = {
+  igualdade_estrita: "Igualdade estrita (a chave deve coincidir exatamente)",
+  igualdade_normalizada: "Igualdade normalizada (sem acento, caixa e espaços duplos)",
+};
+const proximaVersao = (v) => `v${(parseInt(String(v).replace(/\D/g, ""), 10) || 1) + 1}`;
+
 function Cruzamentos() {
   const { env, erro, carregando, recarregar } = useEnvelope(() => SondaAPI.cruzamentos());
-  const cruzamentos = env?.dados || [];
+  const [destaque, setDestaque] = useState(null);
+  const cs = env?.dados || [];
+  const criado = async (novo) => {
+    await recarregar();
+    setDestaque(novo);
+  };
   return (
-    <div>
-      <Lead n="04" titulo="Cruzamentos" sub="Objetos persistentes: assinados, versionados, bifurcáveis. A receita, não o resultado." />
-      <div style={{ marginTop: 20 }}>
-        <Estado carregando={carregando} erro={erro} vazio={cruzamentos.length === 0}>
-          <div style={{ display: "grid", gap: 14 }}>
-            {cruzamentos.map((c) => <CartaoCruzamento key={c.id} c={c} aoMudar={recarregar} />)}
-          </div>
-        </Estado>
-      </div>
+    <div style={{ display: "flex", flexDirection: "column", gap: 32, fontFamily: FONTE_UI }}>
+      <CabecalhoVisao kicker="CRUZAMENTOS · RECEITAS PERSISTENTES"
+        titulo={cs.length ? <><span style={{ color: S.sinal }}>{cs.length}</span> {cs.length === 1 ? "receita" : "receitas"} de ligação</> : "Cruzamentos"}
+        texto="Persiste-se a receita, não o resultado: o eixo, a regra e as versões das fontes bastam para repetir a ligação. Cada execução é um ponto permanente da série do cruzamento. Discordar de uma regra não a altera: bifurca-se, e a linhagem é preservada, com autoria e justificativa." />
+      <p role="status" style={{ margin: 0, fontSize: 15, fontWeight: 600, color: S.sonar }}>
+        {destaque && "Bifurcação registrada. O novo cruzamento está destacado na lista."}
+      </p>
+      <Estado carregando={carregando && !env} erro={erro} vazio={cs.length === 0} vazioMsg="Nenhum cruzamento registrado: execute a ingestão (seed.py).">
+        <ol style={{ margin: 0, padding: 0, listStyle: "none", borderTop: `2px solid ${S.tinta}` }}>
+          {cs.map((c) => <CartaoCruzamento key={c.id} c={c} nomes={cs} destacado={c.id === destaque} aoMudar={recarregar} aoCriar={criado} />)}
+        </ol>
+      </Estado>
     </div>
   );
 }
 
-function CartaoCruzamento({ c, aoMudar }) {
-  const [det, setDet] = useState(null);
+function CartaoCruzamento({ c, nomes, destacado, aoMudar, aoCriar }) {
+  const { env: detEnv, erro: erroDet, recarregar: recDet } = useEnvelope(() => SondaAPI.cruzamento(c.id), [c.id, c.execucoes]);
+  const det = detEnv?.dados;
+  const r = det?.receita;
+  const [receitaAberta, setReceitaAberta] = useState(false);
+  const [painel, setPainel] = useState(null); // null | "executar" | "bifurcar"
   const [exec, setExec] = useState(null);
   const [ocupado, setOcupado] = useState(false);
-  const [abrindo, setAbrindo] = useState(false);
   const [falha, setFalha] = useState(null);
-  const ausente = /faltante/i.test(c.nome);
+  const ref = useRef(null);
+  useEffect(() => { if (destacado) ref.current?.scrollIntoView?.({ block: "center" }); }, [destacado]);
 
-  const abrir = async () => {
-    if (det) return;
-    setAbrindo(true); setFalha(null);
-    try { setDet((await SondaAPI.cruzamento(c.id)).dados); }
-    catch (e) { setFalha(`não foi possível abrir a receita — ${mensagem(e)}`); }
-    finally { setAbrindo(false); }
-  };
+  const faltante = r ? !r.direita : /faltante/i.test(c.nome);
+  const ultima = det?.serie?.[det.serie.length - 1];
+  const pai = c.derivado_de && nomes.find((x) => x.id === c.derivado_de);
+  const idc = `cz-${c.id}`;
+
+  const abrir = (qual) => { setPainel((p) => (p === qual ? null : qual)); setFalha(null); };
   const executar = async () => {
     setOcupado(true); setFalha(null);
-    try { setExec((await SondaAPI.executar(c.id)).dados); aoMudar?.(); }
-    catch (e) { setFalha(`não foi possível executar o cruzamento — ${mensagem(e)}`); }
-    finally { setOcupado(false); }
-  };
-  const bifurcar = async () => {
-    setOcupado(true); setFalha(null);
     try {
-      const base = det || (await SondaAPI.cruzamento(c.id)).dados;
-      await SondaAPI.bifurcar(c.id, {
-        nome: `${c.nome} (bifurcação)`, autor: c.autor, eixo: base.receita.eixo,
-        esquerda: base.receita.esquerda, direita: base.receita.direita,
-        regra: base.receita.regra === "igualdade_estrita" ? "igualdade_normalizada" : "igualdade_estrita",
-        versoes_fonte: base.receita.versoes_fonte || [], versao_regra: "v2",
-        base_faltante: base.receita.base_faltante || null,
-      });
-      aoMudar?.();
-    } catch (e) { setFalha(`não foi possível bifurcar o cruzamento — ${mensagem(e)}`); }
+      const out = (await SondaAPI.executar(c.id)).dados;
+      setExec(out); setPainel(null);
+      await aoMudar?.();
+      recDet();
+    } catch (e) { setFalha(`Não foi possível ${faltante ? "gerar o contrato" : "executar o cruzamento"}: ${mensagem(e)}`); }
     finally { setOcupado(false); }
   };
 
-  const cor = ausente ? S.sinal : S.tinta;
   return (
-    <div style={{ background: S.papel, border: `1px solid ${S.linha}`, borderTop: `4px solid ${cor}`, borderRadius: 8, padding: "18px 20px" }}>
-      <div style={{ fontSize: 18, fontWeight: 700, color: S.tinta, fontFamily: "'Archivo',sans-serif" }}>{c.nome}</div>
-      <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 11, color: S.mudo, marginTop: 4 }}>
-        {String(c.id).slice(0, 8)} · regra {c.versao_regra} · assinado por <span style={{ color: S.tinta }}>{c.autor}</span>
-        {c.derivado_de && <> · <span style={{ color: S.sonar }}>⑂ derivado de {String(c.derivado_de).slice(0, 8)}</span></>}
-        {" · "}<span style={{ color: S.sonar }}>{c.execucoes} execução(ões)</span>
+    <li ref={ref} style={{ padding: "28px 0", borderBottom: `1px solid ${S.linha}`, outline: destacado ? `4px solid ${S.sonar}` : "none", outlineOffset: 8, display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        <span style={{ fontFamily: FONTE_NUM, fontSize: 12.5, fontWeight: 600, letterSpacing: ".1em", color: faltante ? S.sinalTxt : S.mudo }}>
+          {faltante ? "BASE FALTANTE" : "CRUZAMENTO"}{c.derivado_de ? " · BIFURCAÇÃO" : ""}
+        </span>
+        <h3 style={{ margin: 0, fontWeight: 800, fontStretch: "68%", textTransform: "uppercase", fontSize: 32, lineHeight: 1.05 }}>{c.nome}</h3>
+        <span style={{ fontFamily: FONTE_NUM, fontSize: 13, color: S.mudo }}>
+          {String(c.id).slice(0, 8)} · regra {c.versao_regra} · assinado por <span style={{ color: S.tinta }}>{c.autor}</span>
+          {c.derivado_de && <> · derivado de {pai ? pai.nome : String(c.derivado_de).slice(0, 8)}</>}
+          {" · "}{plural(c.execucoes, "execução", "execuções")}
+          {ultima && <> · última em {fmtQuando(ultima.data)}</>}
+        </span>
       </div>
 
-      <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
-        <Botao cor={S.sonar} onClick={abrir} ocupado={abrindo}>ver receita</Botao>
-        <Botao cor={S.sinalTxt} onClick={executar} ocupado={ocupado}>▶ executar</Botao>
-        <Botao cor={S.sonar} onClick={bifurcar} ocupado={ocupado}>⑂ bifurcar (discordar da regra)</Botao>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+        <Btn aria-expanded={receitaAberta} aria-controls={`${idc}-receita`} onClick={() => setReceitaAberta((v) => !v)}>
+          {receitaAberta ? "Ocultar receita" : "Ver receita"}
+        </Btn>
+        <Btn forte aria-expanded={painel === "executar"} onClick={() => abrir("executar")} ocupado={!det && !erroDet}>
+          {faltante ? "Gerar contrato de base faltante" : c.execucoes ? "Executar de novo" : "Executar"}
+        </Btn>
+        <Btn aria-expanded={painel === "bifurcar"} onClick={() => abrir("bifurcar")} ocupado={!det && !erroDet}>Bifurcar</Btn>
       </div>
+      {erroDet && <Falha erro={`Não foi possível abrir a receita: ${erroDet}`} />}
+
+      {receitaAberta && r && (
+        <dl id={`${idc}-receita`} style={{ margin: 0, display: "grid", gridTemplateColumns: "minmax(110px, 160px) 1fr", gap: "8px 20px", alignItems: "baseline", background: S.painel, padding: "16px 18px" }}>
+          {[
+            ["Eixo", r.eixo],
+            ["Regra", REGRAS[r.regra] || r.regra],
+            ["Versão da regra", det.versao_regra],
+            ["Fontes (versões)", r.versoes_fonte?.length ? r.versoes_fonte.join(" · ") : "não declaradas"],
+            ["Lado esquerdo", `${r.esquerda.snapshot_id} · campo ${r.esquerda.campo_chave}`],
+            ["Lado direito", r.direita ? `${r.direita.snapshot_id} · campo ${r.direita.campo_chave}` : "ausente (base faltante)"],
+            r.justificativa && ["Justificativa", r.justificativa],
+            r.base_faltante && ["Pergunta de pesquisa", r.base_faltante.pergunta],
+          ].filter(Boolean).map(([k, v]) => (
+            <React.Fragment key={k}>
+              <dt style={{ color: S.mudo, fontSize: 14.5 }}>{k}</dt>
+              <dd style={{ margin: 0, fontFamily: /Eixo|Fontes|Lado|Versão/.test(k) ? FONTE_NUM : FONTE_UI, fontSize: 14.5, wordBreak: "break-word" }}>{v}</dd>
+            </React.Fragment>
+          ))}
+        </dl>
+      )}
+
+      {painel === "executar" && det && (
+        <Confirmacao id={`${idc}-conf`} titulo={faltante ? "Gerar o contrato de base faltante?" : "Executar este cruzamento?"}
+          rotuloConfirmar={faltante ? "Confirmar e gerar" : "Confirmar e executar"} ocupado={ocupado}
+          aoConfirmar={executar} aoCancelar={() => setPainel(null)}>
+          <span>Esta ação acrescenta um ponto <strong>permanente</strong> à série do cruzamento; o registro não pode ser apagado.</span>
+          <span style={{ color: S.mudo }}>
+            {ultima
+              ? `Última execução: ${fmtQuando(ultima.data)}, com ${fmtNum(ultima.ligados, 0)} ligados e ${fmtNum(ultima.orfaos, 0)} órfãos. Se as fontes não mudaram, o novo ponto repetirá esse resultado.`
+              : "Este cruzamento ainda não foi executado."}
+          </span>
+        </Confirmacao>
+      )}
+
+      {painel === "bifurcar" && det && (
+        <FormBifurcacao c={c} det={det} aoCancelar={() => setPainel(null)} aoCriar={(novo) => { setPainel(null); aoCriar(novo); }} />
+      )}
       <Falha erro={falha} />
 
-      {det && (
-        <div style={{ marginTop: 14, padding: "12px 14px", background: S.painel, borderRadius: 4, fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: S.mudo, lineHeight: 1.7 }}>
-          <div style={{ color: S.tinta, fontWeight: 700, marginBottom: 4 }}>↳ receita (re-executável)</div>
-          <div><span style={{ color: S.mudo }}>eixo:</span> {det.receita.eixo}</div>
-          <div><span style={{ color: S.mudo }}>regra:</span> {det.receita.regra}</div>
-          {det.receita.base_faltante && <div><span style={{ color: S.sinalTxt }}>base faltante:</span> {det.receita.base_faltante.pergunta}</div>}
-        </div>
-      )}
+      {exec && <ResultadoExecucao exec={exec} />}
+    </li>
+  );
+}
 
-      {exec && (
-        <div style={{ marginTop: 12, padding: "11px 13px", background: S.painel, borderLeft: `3px solid ${exec.executavel ? S.sonar : S.sinal}`, borderRadius: 3, fontFamily: "'IBM Plex Mono',monospace", fontSize: 11.5 }}>
-          {exec.executavel ? (
-            <span style={{ color: S.tinta }}>
-              <span style={{ color: S.sonar }}>{exec.ligados} ligados</span> ·{" "}
-              <span style={{ color: S.sinalTxt }}>{exec.orfaos_esquerda + exec.orfaos_direita} órfãos</span> (achado, não escondido)
-            </span>
-          ) : (
-            <span style={{ color: S.sinalTxt }}>⚠ base faltante — contrato gerado: “{exec.achados?.contrato?.pergunta_de_pesquisa}”</span>
-          )}
-        </div>
+function ResultadoExecucao({ exec }) {
+  const orfaos = exec.orfaos_esquerda + exec.orfaos_direita;
+  const m = exec.mudanca;
+  const itens = [
+    ...(exec.achados?.amostra_orfaos_esquerda || []).slice(0, 8).map((o) => ({ ...o, lado: "esquerda" })),
+    ...(exec.achados?.amostra_orfaos_direita || []).slice(0, 8).map((o) => ({ ...o, lado: "direita" })),
+  ];
+  return (
+    <div role="status" style={{ borderLeft: `4px solid ${exec.executavel ? S.sonar : S.sinalTxt}`, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 10 }}>
+      <span style={{ fontFamily: FONTE_NUM, fontSize: 13, color: S.mudo }}>Execução registrada em {fmtQuando(exec.data)}</span>
+      {exec.executavel ? (
+        <>
+          <p style={{ margin: 0, fontSize: 15.5, lineHeight: 1.55 }}>
+            <strong style={{ fontFamily: FONTE_NUM, fontSize: 26 }}>{fmtNum(exec.ligados, 0)}</strong> ligados ·{" "}
+            <strong style={{ fontFamily: FONTE_NUM, fontSize: 26, color: S.sinalTxt }}>{fmtNum(orfaos, 0)}</strong> órfãos
+          </p>
+          {m && (m.d_ligados === 0 && m.d_orfaos === 0
+            ? <span style={{ fontSize: 14.5, color: S.mudo }}>Resultado idêntico ao da execução anterior: as fontes não mudaram.</span>
+            : <span style={{ fontSize: 14.5, color: S.mudo }}>Em relação à execução anterior: {m.d_ligados > 0 ? "+" : ""}{fmtNum(m.d_ligados, 0)} ligados, {m.d_orfaos > 0 ? "+" : ""}{fmtNum(m.d_orfaos, 0)} órfãos.</span>)}
+          <AmostraOrfaos itens={itens} total={orfaos} />
+        </>
+      ) : (
+        <>
+          <span style={{ fontSize: 15 }}>Não há base do outro lado: o cruzamento não é executável e gerou o contrato abaixo.</span>
+          <Contrato contrato={exec.achados?.contrato} />
+        </>
       )}
     </div>
+  );
+}
+
+function FormBifurcacao({ c, det, aoCancelar, aoCriar }) {
+  const r = det.receita;
+  const outra = r.regra === "igualdade_estrita" ? "igualdade_normalizada" : "igualdade_estrita";
+  const [nome, setNome] = useState(`${c.nome} (${outra === "igualdade_estrita" ? "regra estrita" : "regra normalizada"})`);
+  const [regra, setRegra] = useState(outra);
+  const [just, setJust] = useState("");
+  const [autor, setAutor] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const [falha, setFalha] = useState(null);
+  const id = `bif-${c.id}`;
+  const valido = nome.trim() && just.trim() && autor.trim() && regra !== r.regra;
+  const campo = { minHeight: 44, width: "100%", padding: "8px 10px", border: `2px solid ${S.tinta}`, background: S.papel, color: S.tinta, fontFamily: FONTE_UI, fontSize: 15 };
+  const rotulo = { display: "flex", flexDirection: "column", gap: 4, fontSize: 14.5, fontWeight: 600 };
+
+  const enviar = async (ev) => {
+    ev.preventDefault();
+    if (!valido) return;
+    setOcupado(true); setFalha(null);
+    try {
+      const novo = (await SondaAPI.bifurcar(c.id, {
+        nome: nome.trim(), autor: autor.trim(), eixo: r.eixo, esquerda: r.esquerda, direita: r.direita || null,
+        regra, limiar: r.limiar ?? null, versoes_fonte: r.versoes_fonte || [], base_faltante: r.base_faltante || null,
+        versao_regra: proximaVersao(det.versao_regra), justificativa: just.trim(),
+      })).dados;
+      aoCriar(novo.id);
+    } catch (e) { setFalha(`Não foi possível bifurcar o cruzamento: ${mensagem(e)}`); setOcupado(false); }
+  };
+
+  return (
+    <form onSubmit={enviar} aria-labelledby={`${id}-t`} style={{ border: `2px solid ${S.tinta}`, background: S.painel, padding: "18px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+      <strong id={`${id}-t`} style={{ fontSize: 16 }}>Bifurcar: discordar da regra</strong>
+      <span style={{ fontSize: 15, lineHeight: 1.55 }}>
+        Cria um novo cruzamento <strong>permanente</strong>, com linhagem para este. O original permanece intacto, com as suas execuções.
+      </span>
+      <label style={rotulo}>Nome do novo cruzamento
+        <input value={nome} onChange={(e) => setNome(e.target.value)} required style={campo} />
+      </label>
+      <label style={rotulo}>Regra de ligação
+        <select value={regra} onChange={(e) => setRegra(e.target.value)} style={campo}>
+          {Object.entries(REGRAS).map(([k, v]) => <option key={k} value={k}>{v}{k === r.regra ? " (a atual)" : ""}</option>)}
+        </select>
+      </label>
+      {regra === r.regra && <span role="alert" style={{ fontSize: 14, color: S.sinalTxt }}>Escolha uma regra diferente da atual: bifurcar é discordar dela.</span>}
+      <label style={rotulo}>Justificativa (por que a regra deve mudar)
+        <textarea value={just} onChange={(e) => setJust(e.target.value)} required rows={3} maxLength={1000} style={{ ...campo, resize: "vertical" }} />
+      </label>
+      <label style={rotulo}>Assinado por
+        <input value={autor} onChange={(e) => setAutor(e.target.value)} required style={campo} />
+      </label>
+      <Falha erro={falha} />
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+        <button type="submit" disabled={!valido || ocupado} style={{ ...BTN, background: S.tinta, color: S.papel, opacity: !valido || ocupado ? 0.55 : 1, cursor: ocupado ? "wait" : valido ? "pointer" : "not-allowed" }}>
+          {ocupado ? "Registrando…" : "Confirmar bifurcação"}
+        </button>
+        <Btn ocupado={ocupado} onClick={aoCancelar}>Cancelar</Btn>
+      </div>
+    </form>
   );
 }
 
@@ -1305,17 +1477,6 @@ function Botao({ cor, onClick, ocupado, children }) {
 function Mono({ cor, children }) {
   return <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: cor, padding: "8px 0" }}>{children}</div>;
 }
-function Lead({ n, titulo, sub }) {
-  return (
-    <div style={{ borderLeft: `3px solid ${S.sinal}`, paddingLeft: 14 }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: 12, color: S.sinalTxt, fontWeight: 700 }}>{n}</span>
-        <h2 style={{ fontSize: 24, fontWeight: 800, margin: 0, color: S.tinta, fontFamily: "'Archivo',sans-serif", letterSpacing: "-.01em" }}>{titulo}</h2>
-      </div>
-      <p style={{ fontSize: 14, color: S.mudo, margin: "6px 0 0", fontFamily: "'Archivo',sans-serif" }}>{sub}</p>
-    </div>
-  );
-}
 const VISOES = [
   { id: "painel", rotulo: "PAINEL", comp: Painel },
   { id: "territorio", rotulo: "TERRITÓRIO", comp: Territorio },
@@ -1330,7 +1491,7 @@ export default function SondaApp() {
   const [v, setV] = useState("painel");
   const Atual = VISOES.find((x) => x.id === v).comp;
   const ir = (id) => { setV(id); if (typeof window !== "undefined") window.scrollTo(0, 0); };
-  const larg = ["painel", "territorio", "ligacoes", "catalogo", "trajetoria"].includes(v) ? 1280 : 940;
+  const larg = ["painel", "territorio", "ligacoes", "catalogo", "trajetoria", "percurso", "cruzamentos"].includes(v) ? 1280 : 940;
   return (
     <div style={{ minHeight: "100vh", background: S.papel, color: S.tinta, fontFamily: "'Archivo',sans-serif" }}>
       <style>{`

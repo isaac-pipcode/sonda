@@ -68,6 +68,7 @@ class ReceitaIn(BaseModel):
     versoes_fonte: list[str] = []
     base_faltante: Optional[BaseFaltante] = None
     versao_regra: str = "v1"
+    justificativa: Optional[str] = Field(None, max_length=1000, description="por que a regra foi alterada (bifurcação)")
 
 
 # ── raiz ────────────────────────────────────────────────────────────────────
