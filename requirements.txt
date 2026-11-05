@@ -8,3 +8,4 @@ duckdb>=0.10
 requests>=2.31
 pydantic>=2.6
 pytest>=8.0
+httpx>=0.27  # exigido pelo TestClient do Starlette nos testes de rotas
