@@ -16,6 +16,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
 from . import engine, fsa, funil as funil_mod, percurso as percurso_mod, ridab, series as series_mod, territorio as territorio_mod
+from .config import CONFIG
 from .db import connect, init_schema
 from .provenance import agora_utc, envelope, fixity
 
@@ -25,13 +26,20 @@ app = FastAPI(
     "Carbono ancora. Sinal interfere. Sonar lê.",
     version="0.1.0",
 )
-# CORS liberado para o SondaApp.jsx em desenvolvimento.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+
+def opcoes_cors(origens: tuple[str, ...], regex: str = "") -> dict:
+    """Argumentos do CORSMiddleware. Sem origens nem regex configurados, libera "*"
+    (desenvolvimento); com qualquer um dos dois, só as origens declaradas passam.
+    O front só usa GET e POST com Content-Type: json; nada além disso é liberado."""
+    if not origens and not regex:
+        return {"allow_origins": ["*"], "allow_methods": ["*"], "allow_headers": ["*"]}
+    return {"allow_origins": list(origens), "allow_origin_regex": regex or None,
+            "allow_methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type"]}
+
+
+# CORS por ambiente: SONDA_CORS_ORIGINS / SONDA_CORS_ORIGIN_REGEX (ver .env.example).
+app.add_middleware(CORSMiddleware, **opcoes_cors(CONFIG.cors_origens, CONFIG.cors_origem_regex))
 
 
 @app.on_event("startup")

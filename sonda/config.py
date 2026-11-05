@@ -22,6 +22,10 @@ class Config:
     ridab_revisao: str = "6c5e6ae1ce5a866b76039e1f3dce7776cf22dfe1"
     # prefixo alternativo dos Parquet (diretório local ou espelho); vazio = Hugging Face.
     ridab_base: str = ""
+    # CORS: origens exatas separadas por vírgula; vazio = "*" (só para desenvolvimento).
+    cors_origens: tuple[str, ...] = ()
+    # regex opcional de origens (ex.: previews da Vercel); combina com as exatas.
+    cors_origem_regex: str = ""
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -36,6 +40,9 @@ class Config:
             ridab_revisao=os.environ.get(
                 "SONDA_RIDAB_REV", "6c5e6ae1ce5a866b76039e1f3dce7776cf22dfe1"),
             ridab_base=os.environ.get("SONDA_RIDAB_BASE", ""),
+            cors_origens=tuple(
+                o.strip().rstrip("/") for o in os.environ.get("SONDA_CORS_ORIGINS", "").split(",") if o.strip()),
+            cors_origem_regex=os.environ.get("SONDA_CORS_ORIGIN_REGEX", "").strip(),
         )
 
 

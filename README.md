@@ -191,7 +191,7 @@ Defina a variável de ambiente:
 VITE_SONDA_API = https://<seu-backend>.fly.dev
 ```
 
-Variáveis em `.env.example`. CORS já está liberado na API para o frontend.
+Variáveis em `.env.example`. CORS: sem variáveis, a API libera qualquer origem (desenvolvimento). Em produção, defina `SONDA_CORS_ORIGINS` (origens do front, separadas por vírgula) e, para os previews da Vercel, `SONDA_CORS_ORIGIN_REGEX`; com qualquer uma delas, só essas origens passam.
 
 ### Cron de ingestão
 
