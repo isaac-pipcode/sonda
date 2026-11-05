@@ -7,6 +7,7 @@ temporal só cresce.
 """
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 import duckdb
@@ -38,12 +39,22 @@ def opcoes_cors(origens: tuple[str, ...], regex: str = "") -> dict:
             "allow_methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type"]}
 
 
+def aviso_cors(origens: tuple[str, ...], regex: str = "") -> Optional[str]:
+    """Mensagem de alerta quando o CORS está aberto a qualquer origem; None se restrito."""
+    if origens or regex:
+        return None
+    return ("CORS aberto a qualquer origem (SONDA_CORS_ORIGINS e SONDA_CORS_ORIGIN_REGEX vazias). "
+            "Aceitável em desenvolvimento; em produção, declare as origens do front.")
+
+
 # CORS por ambiente: SONDA_CORS_ORIGINS / SONDA_CORS_ORIGIN_REGEX (ver .env.example).
 app.add_middleware(CORSMiddleware, **opcoes_cors(CONFIG.cors_origens, CONFIG.cors_origem_regex))
 
 
 @app.on_event("startup")
 def _startup() -> None:
+    if (aviso := aviso_cors(CONFIG.cors_origens, CONFIG.cors_origem_regex)):
+        logging.getLogger("uvicorn.error").warning(aviso)
     # idempotente; garante o esquema no primeiro boot.
     try:
         init_schema()

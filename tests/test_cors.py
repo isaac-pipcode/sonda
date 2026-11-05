@@ -55,3 +55,26 @@ def test_config_le_e_normaliza_as_variaveis(monkeypatch):
     c = Config.from_env()
     assert c.cors_origens == ("https://a.app", "https://b.app")
     assert c.cors_origem_regex == "^https://x$"
+
+
+def test_aviso_so_quando_o_cors_esta_aberto():
+    from sonda.api import aviso_cors
+    assert "qualquer origem" in aviso_cors((), "")
+    assert aviso_cors(("https://a.app",), "") is None
+    assert aviso_cors((), "^https://x$") is None
+
+
+import dataclasses
+import logging
+
+import pytest
+
+
+@pytest.mark.parametrize("origens,deve_avisar", [((), True), (("https://a.app",), False)])
+def test_boot_registra_o_aviso_so_com_cors_aberto(caplog, monkeypatch, origens, deve_avisar):
+    from sonda import api
+    monkeypatch.setattr(api, "init_schema", lambda: None)
+    monkeypatch.setattr(api, "CONFIG", dataclasses.replace(api.CONFIG, cors_origens=origens, cors_origem_regex=""))
+    with caplog.at_level(logging.WARNING, logger="uvicorn.error"):
+        api._startup()
+    assert any("CORS aberto" in r.message for r in caplog.records) is deve_avisar
