@@ -1,11 +1,7 @@
-# Dependências de desenvolvimento da SONDA (backend + testes).
-# Para o contêiner de deploy, use requirements-backend.txt (sem pytest).
+# Dependências de EXECUÇÃO da API. É este o arquivo que a Vercel instala para a
+# função Python (api/index.py). Testes e ferramentas ficam em requirements-dev.txt.
 fastapi>=0.110
-uvicorn[standard]>=0.27
 psycopg[binary]>=3.1
 psycopg-pool>=3.2
 duckdb>=0.10
-requests>=2.31
 pydantic>=2.6
-pytest>=8.0
-httpx>=0.27  # exigido pelo TestClient do Starlette nos testes de rotas

@@ -7,7 +7,11 @@
   2). Descartar `proveniencia` seria um antipadrão.
 */
 
-const BASE = import.meta?.env?.VITE_SONDA_API || "http://localhost:8000";
+// Em produção a API é servida no MESMO domínio (função Python da Vercel em /api):
+// BASE vazio = caminho relativo. Em desenvolvimento, o padrão é o uvicorn local.
+// VITE_SONDA_API, se definida, prevalece nos dois casos (ex.: backend em outro domínio).
+const ENV = import.meta?.env || {};
+const BASE = ENV.VITE_SONDA_API ?? (ENV.DEV ? "http://localhost:8000" : "");
 
 async function get(rota) {
   const r = await fetch(`${BASE}${rota}`);

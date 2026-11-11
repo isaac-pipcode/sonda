@@ -15,31 +15,19 @@ Para publicar uma nova versão da base: hospede o arquivo, atualize o pin
 """
 from __future__ import annotations
 
-import hashlib
 import os
 import pathlib
 import sys
-import urllib.request
 from typing import Optional
 
 from sonda import fsa
-
-PIN = pathlib.Path(__file__).resolve().parent / "data" / "fsa.db.sha256"
-_BLOCO = 1 << 20
-
-
-def sha256_arquivo(caminho: pathlib.Path) -> str:
-    """sha256 de um arquivo, lido em blocos."""
-    h = hashlib.sha256()
-    with open(caminho, "rb") as f:
-        for bloco in iter(lambda: f.read(_BLOCO), b""):
-            h.update(bloco)
-    return h.hexdigest()
+from sonda.baixa import PIN_FSA as PIN, sha256_arquivo  # noqa: F401 (reexportados)
+from sonda.baixa import baixar as _baixar, hash_esperado as _hash_esperado
 
 
 def hash_esperado(pin: pathlib.Path = PIN) -> str:
     """Lê o hash do arquivo de pin (formato do `sha256sum`: hash + nome)."""
-    return pin.read_text(encoding="utf-8").split()[0].lower()
+    return _hash_esperado(pin)
 
 
 def baixar(
@@ -48,33 +36,9 @@ def baixar(
     esperado: Optional[str] = None,
     token: Optional[str] = None,
 ) -> pathlib.Path:
-    """Baixa `url` para `destino` e só o instala se o sha256 bater com o pin.
-
-    Levanta `ValueError` (e não deixa resíduo) se o hash divergir.
-    """
-    destino = destino or fsa.caminho_db()
-    esperado = (esperado or hash_esperado()).lower()
-    if destino.exists() and sha256_arquivo(destino) == esperado:
-        return destino
-
-    destino.parent.mkdir(parents=True, exist_ok=True)
-    parcial = destino.with_name(destino.name + ".part")
-    cabecalhos = {"Authorization": f"Bearer {token}"} if token else {}
-    req = urllib.request.Request(url, headers=cabecalhos)
-    h = hashlib.sha256()
-    try:
-        with urllib.request.urlopen(req, timeout=60) as r, open(parcial, "wb") as f:  # noqa: S310
-            for bloco in iter(lambda: r.read(_BLOCO), b""):
-                h.update(bloco)
-                f.write(bloco)
-        if h.hexdigest() != esperado:
-            raise ValueError(
-                f"sha256 divergente: esperado {esperado[:12]}…, obtido {h.hexdigest()[:12]}…"
-            )
-        os.replace(parcial, destino)
-    finally:
-        parcial.unlink(missing_ok=True)
-    return destino
+    """Baixa `url` para `destino` (padrão: o caminho configurado da FSA) e só o
+    instala se o sha256 bater com o pin. Levanta `ValueError` se divergir."""
+    return _baixar(url, destino or fsa.caminho_db(), esperado or hash_esperado(), token)
 
 
 def main() -> int:

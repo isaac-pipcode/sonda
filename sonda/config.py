@@ -18,6 +18,10 @@ class Config:
     pool_max: int = 10
     # base FSA (SQLite de segunda ordem) lida in-place pelo motor DuckDB.
     fsa_db_path: str = "data/fsa.db"
+    # onde a FSA está hospedada; se o arquivo local faltar, é baixada no primeiro uso.
+    fsa_url: str = ""
+    # diretório gravável para extensões do DuckDB (httpfs, sqlite); vazio = padrão do DuckDB.
+    duckdb_dir: str = ""
     # RIDAB (Parquet remoto no Hugging Face), fixado a uma revisão (commit).
     ridab_revisao: str = "6c5e6ae1ce5a866b76039e1f3dce7776cf22dfe1"
     # prefixo alternativo dos Parquet (diretório local ou espelho); vazio = Hugging Face.
@@ -29,14 +33,17 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
+        # Em função serverless (Vercel) só /tmp é gravável.
+        serverless = bool(os.environ.get("VERCEL"))
         return cls(
-            database_url=os.environ.get(
-                "SONDA_DATABASE_URL",
-                # default de desenvolvimento; sobrescreva em produção.
-                "postgresql://sonda:sonda@localhost:5432/sonda",
-            ),
+            # SONDA_DATABASE_URL tem precedência; DATABASE_URL/POSTGRES_URL são as que a
+            # integração Neon–Vercel cria. O default é só para desenvolvimento.
+            database_url=(os.environ.get("SONDA_DATABASE_URL") or os.environ.get("DATABASE_URL")
+                          or os.environ.get("POSTGRES_URL") or "postgresql://sonda:sonda@localhost:5432/sonda"),
             pool_max=int(os.environ.get("SONDA_POOL_MAX", "10")),
-            fsa_db_path=os.environ.get("SONDA_FSA_DB", "data/fsa.db"),
+            fsa_db_path=os.environ.get("SONDA_FSA_DB", "/tmp/sonda/fsa.db" if serverless else "data/fsa.db"),
+            fsa_url=os.environ.get("SONDA_FSA_URL", "").strip(),
+            duckdb_dir=os.environ.get("SONDA_DUCKDB_DIR", "/tmp/sonda/duckdb" if serverless else ""),
             ridab_revisao=os.environ.get(
                 "SONDA_RIDAB_REV", "6c5e6ae1ce5a866b76039e1f3dce7776cf22dfe1"),
             ridab_base=os.environ.get("SONDA_RIDAB_BASE", ""),

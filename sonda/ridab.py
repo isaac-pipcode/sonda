@@ -25,7 +25,7 @@ from typing import Any, Optional
 
 import duckdb
 
-from . import fsa
+from . import duck, fsa
 from .config import CONFIG
 from .provenance import fixity
 
@@ -95,7 +95,7 @@ def url_tabela(tabela: str, base: Optional[str] = None) -> str:
 
 
 def _conexao(base: Optional[str] = None) -> duckdb.DuckDBPyConnection:
-    con = duckdb.connect()
+    con = duck.conectar()
     if _prefixo(base).startswith(("http://", "https://")):
         con.execute("INSTALL httpfs; LOAD httpfs;")
     return con

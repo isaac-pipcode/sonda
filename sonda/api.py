@@ -11,7 +11,8 @@ import logging
 from typing import Optional
 
 import duckdb
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
@@ -49,6 +50,12 @@ def aviso_cors(origens: tuple[str, ...], regex: str = "") -> Optional[str]:
 
 # CORS por ambiente: SONDA_CORS_ORIGINS / SONDA_CORS_ORIGIN_REGEX (ver .env.example).
 app.add_middleware(CORSMiddleware, **opcoes_cors(CONFIG.cors_origens, CONFIG.cors_origem_regex))
+
+
+@app.exception_handler(FileNotFoundError)
+def _base_ausente(_: Request, e: FileNotFoundError) -> JSONResponse:
+    """Base local ausente (ex.: FSA não baixada) é indisponibilidade, não erro interno."""
+    return JSONResponse(status_code=503, content={"detail": f"base indisponível: {e}"})
 
 
 @app.on_event("startup")
@@ -258,7 +265,7 @@ def snapshots():
 # ── base FSA: dataset de segunda ordem lido in-place (na língua própria) ──────
 def _exige_fsa():
     if not fsa.disponivel():
-        raise HTTPException(404, "base FSA indisponível (defina SONDA_FSA_DB ou inclua data/fsa.db)")
+        raise HTTPException(404, "base FSA indisponível (defina SONDA_FSA_URL ou SONDA_FSA_DB)")
 
 
 @app.get("/api/fsa/tabelas")

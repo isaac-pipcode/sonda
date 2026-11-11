@@ -127,7 +127,7 @@ não corrigida. `GET /api/ligacoes/funil` mostra o que liga e o que sobra do con
 ## Como rodar
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
 # 1. Postgres (um só serviço)
 docker compose up -d db
@@ -157,41 +157,43 @@ python -c "from sonda.ingest import ingerir_arquivo; \
 pytest tests/ -q      # motor de cruzamento (DuckDB, sem banco)
 ```
 
-## Deploy (estratégia Split)
+## Deploy (Vercel + Neon)
 
-O backend é um **contêiner sempre-ligado** (README §4: "1 VM/contêiner"); o
-Postgres é **gerenciado e externo**, livre para escalar; o frontend é **estático
-na Vercel**. Nenhuma das sete decisões muda — só a topologia.
+Front e API no **mesmo projeto Vercel**: o app Vite é estático e a API FastAPI roda
+como **função Python** (`api/index.py`), servida no próprio domínio em `/api/*`.
+O Postgres é **gerenciado no Neon**. Nenhuma das sete decisões muda, só a topologia.
 
 ```
-Vercel (web/)  ──VITE_SONDA_API──▶  Backend FastAPI+DuckDB (Fly/Render)  ──▶  Postgres gerenciado (Neon/Supabase)
-SondaApp.jsx                         Dockerfile · pool de conexões              JSONB · snapshots append-only
+Vercel ─┬─ web/dist (SondaApp.jsx, estático)
+        └─ /api/* → api/index.py (FastAPI + DuckDB)  ──▶  Neon (Postgres: JSONB, snapshots append-only)
+                     │                                     
+                     ├─ fsa.db: baixada da release no 1º uso, conferida pelo pin (/tmp)
+                     └─ RIDAB: Parquet remoto (httpfs instalado em /tmp)
 ```
 
-**1. Postgres gerenciado** (Neon/Supabase). Crie o banco e copie a connection
-string **pooled** (no Neon, o host com `-pooler`). O pool de conexões
-(`psycopg_pool`) evita esgotar o limite quando o banco escala.
+**1. Neon.** Pela integração da Vercel (Storage → Neon) ou criando o projeto no
+Neon. A API lê `SONDA_DATABASE_URL` e, na falta dela, `DATABASE_URL`/`POSTGRES_URL`
+(as que a integração cria). Use a connection string **pooled** (host com `-pooler`).
 
-**2. Backend** (Fly.io de exemplo; Render/Railway equivalem):
-```bash
-fly launch --no-deploy          # usa o Dockerfile e fly.toml
-fly secrets set SONDA_DATABASE_URL="postgresql://…-pooler…/sonda?sslmode=require"
-fly deploy
-# carregar dados de teste (fac-símiles) uma vez:
-fly ssh console -C "python seed.py"
+**2. Variáveis na Vercel** (Production e Preview):
 ```
+SONDA_FSA_URL = https://github.com/isaac-pipcode/sonda/releases/download/fsa.db/fsa.db
+DATABASE_URL  = (criada pela integração Neon, ou cole a pooled)
+```
+`VITE_SONDA_API` não é necessária: sem ela, o front chama `/api` no próprio domínio.
 
-**3. Frontend** (Vercel): o jeito limpo é apontar o **Root Directory = `web`**
-nas configurações do projeto Vercel — assim a Vercel vê só o app Vite e nunca o
-`requirements.txt` da raiz (que dispararia o builder Python por engano).
-Como rede de segurança, há um `vercel.json` na raiz que força o build só do
-frontend (`framework: null`, build de `web/`), caso o Root Directory fique na raiz.
-Defina a variável de ambiente:
-```
-VITE_SONDA_API = https://<seu-backend>.fly.dev
-```
+**3. Esquema e dados iniciais.** Crie o segredo `SONDA_DATABASE_URL` no GitHub
+(Settings → Secrets → Actions) e dispare o workflow **Seed do banco (manual)**.
+Ele se recusa a rodar se o banco já tiver cruzamentos.
 
-Variáveis em `.env.example`. CORS: sem variáveis, a API libera qualquer origem (desenvolvimento). Em produção, defina `SONDA_CORS_ORIGINS` (origens do front, separadas por vírgula) e, para os previews da Vercel, `SONDA_CORS_ORIGIN_REGEX`; com qualquer uma delas, só essas origens passam.
+Arranque a frio medido localmente: 1,5–3 s na primeira chamada de cada rota de
+leitura (download da FSA e da extensão httpfs); depois, ~0,03 s.
+
+Alternativa sem Vercel para a API: o `Dockerfile` e o `fly.toml` continuam válidos
+(`fly deploy --build-arg SONDA_FSA_URL=…`); aí defina `VITE_SONDA_API` e o CORS
+(`SONDA_CORS_ORIGINS`, `SONDA_CORS_ORIGIN_REGEX`), desnecessário no mesmo domínio.
+
+Variáveis em `.env.example`.
 
 ### Cron de ingestão
 
