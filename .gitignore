@@ -1,6 +1,9 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+# base FSA: hospedada fora do git; só o pin data/fsa.db.sha256 é versionado
+data/fsa.db
+data/fsa.db.part
 # saída de coleta (dado coletado vive fora do versionamento)
 sonda_mapas_cinema_*.json
 .env

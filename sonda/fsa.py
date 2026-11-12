@@ -17,8 +17,10 @@ via `sqlite3` — usado quando a extensão do DuckDB não está disponível (off
 from __future__ import annotations
 
 import hashlib
+import logging
 import pathlib
 import sqlite3
+import threading
 from typing import Optional
 
 from .config import CONFIG
@@ -32,8 +34,48 @@ def caminho_db() -> pathlib.Path:
     return p if p.is_absolute() else (_REPO_RAIZ / p)
 
 
+_trava_download = threading.Lock()
+_log = logging.getLogger("uvicorn.error")
+
+
+_motivo: Optional[str] = None  # por que a base está indisponível (diagnóstico do deploy)
+
+
+def garantir() -> bool:
+    """True se a base estiver no disco. Se faltar e `SONDA_FSA_URL` estiver definida,
+    baixa-a uma vez (conferida pelo pin) — caso da função serverless, que nasce sem
+    disco persistente. Falha de rede não derruba a API: a base fica indisponível e
+    `motivo_indisponivel()` diz por quê."""
+    global _motivo
+    destino = caminho_db()
+    if destino.exists():
+        _motivo = None
+        return True
+    if not CONFIG.fsa_url:
+        _motivo = f"SONDA_FSA_URL não está definida neste ambiente e {destino} não existe"
+        return False
+    from .baixa import baixar, hash_esperado
+
+    with _trava_download:
+        if destino.exists():
+            return True
+        try:
+            baixar(CONFIG.fsa_url, destino, hash_esperado())
+        except Exception as e:  # rede, 404, pin ausente ou hash divergente
+            _motivo = f"falha ao baixar {CONFIG.fsa_url} para {destino}: {type(e).__name__}: {e}"
+            _log.warning("FSA: %s", _motivo)
+            return False
+    _motivo = None
+    return True
+
+
+def motivo_indisponivel() -> Optional[str]:
+    """Último motivo registrado para a base estar indisponível (None se disponível)."""
+    return _motivo
+
+
 def disponivel() -> bool:
-    return caminho_db().exists()
+    return garantir()
 
 
 def fixity_arquivo() -> str:
@@ -47,6 +89,8 @@ def fixity_arquivo() -> str:
 
 # ── inventário e dicionário (a base é autodescritiva) ───────────────────────
 def _conn_sqlite() -> sqlite3.Connection:
+    if not garantir():
+        raise FileNotFoundError(f"base FSA indisponível — {_motivo}")
     con = sqlite3.connect(f"file:{caminho_db()}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
     return con
@@ -104,9 +148,9 @@ def ressalvas_por_coluna() -> dict[str, dict]:
 # ── leitura de uma tabela/visão (DuckDB in-place, fallback sqlite3) ──────────
 def _tenta_duckdb(nome: str, limite: int, offset: int):
     """Lê via DuckDB + sqlite_scanner. Levanta se a extensão não carregar."""
-    import duckdb
+    from . import duck
 
-    con = duckdb.connect()
+    con = duck.conectar()
     try:
         con.execute("INSTALL sqlite; LOAD sqlite;")
         con.execute(f"ATTACH '{caminho_db()}' AS fsa (TYPE sqlite, READ_ONLY);")

@@ -63,7 +63,7 @@ append-only. Ver `sonda/percurso.py` e `/api/percursos`.
 
 ## Base FSA (dataset de segunda ordem)
 
-`data/fsa.db` é uma base de pesquisa madura sobre o **Fundo Setorial do
+`data/fsa.db` (hospedada **fora do git**; ver abaixo) é uma base de pesquisa madura sobre o **Fundo Setorial do
 Audiovisual** (ANCINE): fatos, dimensões, visões analíticas estáveis e uma
 camada de proveniência/ressalvas embutida (`meta_tabela`, `meta_coluna`). Entra
 na Sonda como **base de primeira classe** ao lado do Mapa Cultural — **sem** ser
@@ -81,10 +81,53 @@ Princípio encarnado: **impossível citar um número sem ver seu asterisco** —
 consulta devolve as ressalvas metodológicas das colunas retornadas. Docs da base:
 `docs/DOCUMENTACAO_MIGRACAO_SONDA.md`, `docs/MAPA_CRUZAMENTOS_SONDA.md`.
 
+**Obtendo a `fsa.db`.** A base não é versionada (só o pin `data/fsa.db.sha256`).
+Defina `SONDA_FSA_URL` (e `SONDA_FSA_TOKEN`, se a hospedagem for privada) e rode
+`python baixar_fsa.py`: o arquivo só é instalado se o sha256 bater com o pin.
+No deploy, `fly deploy --build-arg SONDA_FSA_URL=…`; no CI, a variável de
+repositório `SONDA_FSA_URL` (e o segredo opcional `SONDA_FSA_TOKEN`). Sem a
+variável, os testes da FSA são pulados.
+
+## Base RIDAB (dataset de terceira ordem)
+
+O [RIDAB](https://huggingface.co/datasets/riabr-dados/riab) reúne dados oficiais
+(ANCINE, IBGE…) **já tratados por terceiros**. É lido por DuckDB direto do Parquet
+remoto, fixado a uma **revisão** (commit) — nenhum dado é versionado aqui. Entra
+com autoria e proveniência próprias, sem fusão com a FSA (decisão 3).
+
+| Endpoint | O que devolve |
+|---|---|
+| `GET /api/ridab/contratos-enriquecidos` | contratos da FSA + código IBGE do proponente (via CNPJ) + valores em R$ de 2024; **visão calculada**, nada gravado |
+| `POST /api/ridab/registrar` | snapshot imutável (referência: revisão + sha256 por arquivo), idempotente |
+
+Variáveis: `SONDA_RIDAB_REV` (revisão fixada) e `SONDA_RIDAB_BASE` (prefixo
+alternativo dos Parquet, para testes offline/espelho). Chaves, cobertura e
+ressalvas verificadas: `docs/RIDAB_INVENTARIO.md`.
+
+## Séries anuais (o tempo como único eixo comum)
+
+`GET /api/series?de=2009&ate=2026&moeda=real|nominal` devolve cinco séries —
+fomento contratado (FSA), renúncia fiscal captada, público das obras brasileiras,
+salas abertas e preço médio do ingresso (RIDAB) — **cada uma na sua unidade e
+escala** (decisão 3: nada é somado nem indexado entre bases). Ano sem dado é
+`null`, nunca zero; cada série traz `cobertura`, `ressalvas` e o que ficou de
+fora (`extras`, ex.: projetos de renúncia sem data de aprovação). `real` aplica o
+fator IPCA do **ano do evento** (RIDAB/IBGE). A proveniência das duas bases vem
+lado a lado; os agregados do RIDAB são lidos uma vez por revisão (imutável).
+Núcleo em `sonda/series.py`, testável offline.
+
+`GET /api/territorio?moeda=real|nominal` devolve o fomento contratado do FSA e as
+salas de exibição **por UF da produtora proponente** (não do local da obra): as
+partes são calculadas sobre os contratos com UF, os sem UF vêm à parte, e uma
+população que contradiz os municípios da própria base é sinalizada em `verificar`,
+não corrigida. `GET /api/ligacoes/funil` mostra o que liga e o que sobra do contrato
+à obra (CPB) e à bilheteria, com segmentos exclusivos (seguro · ambíguo · sem obra),
+órfãos por ano e por chamada, os maiores contratos sem obra e o elo ausente.
+
 ## Como rodar
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 
 # 1. Postgres (um só serviço)
 docker compose up -d db
@@ -114,41 +157,41 @@ python -c "from sonda.ingest import ingerir_arquivo; \
 pytest tests/ -q      # motor de cruzamento (DuckDB, sem banco)
 ```
 
-## Deploy (estratégia Split)
+## Deploy (Vercel + Neon)
 
-O backend é um **contêiner sempre-ligado** (README §4: "1 VM/contêiner"); o
-Postgres é **gerenciado e externo**, livre para escalar; o frontend é **estático
-na Vercel**. Nenhuma das sete decisões muda — só a topologia.
+Front e API no **mesmo projeto Vercel**: o app Vite é estático e a API FastAPI roda
+como **função Python** (`api/index.py`), servida no próprio domínio em `/api/*`.
+O Postgres é **gerenciado no Neon**. Nenhuma das sete decisões muda, só a topologia.
 
 ```
-Vercel (web/)  ──VITE_SONDA_API──▶  Backend FastAPI+DuckDB (Fly/Render)  ──▶  Postgres gerenciado (Neon/Supabase)
-SondaApp.jsx                         Dockerfile · pool de conexões              JSONB · snapshots append-only
+Vercel ─┬─ web/dist (SondaApp.jsx, estático)
+        └─ /api/* → api/index.py (FastAPI + DuckDB)  ──▶  Neon (Postgres: JSONB, snapshots append-only)
+                     │                                     
+                     ├─ fsa.db: baixada da release no 1º uso, conferida pelo pin (/tmp)
+                     └─ RIDAB: Parquet remoto (httpfs instalado em /tmp)
 ```
 
-**1. Postgres gerenciado** (Neon/Supabase). Crie o banco e copie a connection
-string **pooled** (no Neon, o host com `-pooler`). O pool de conexões
-(`psycopg_pool`) evita esgotar o limite quando o banco escala.
+**1. Neon.** Pela integração da Vercel (Storage → Neon) ou criando o projeto no
+Neon. A API lê `SONDA_DATABASE_URL` e, na falta dela, `DATABASE_URL`/`POSTGRES_URL`
+(as que a integração cria). Use a connection string **pooled** (host com `-pooler`).
 
-**2. Backend** (Fly.io de exemplo; Render/Railway equivalem):
-```bash
-fly launch --no-deploy          # usa o Dockerfile e fly.toml
-fly secrets set SONDA_DATABASE_URL="postgresql://…-pooler…/sonda?sslmode=require"
-fly deploy
-# carregar dados de teste (fac-símiles) uma vez:
-fly ssh console -C "python seed.py"
-```
+**2. Variáveis na Vercel** (Production e Preview): só `DATABASE_URL`, criada pela
+integração Neon (ou cole a pooled). A `fsa.db` vem por padrão da release pública
+deste repositório, conferida pelo pin; `SONDA_FSA_URL` só serve para trocar a fonte.
+`VITE_SONDA_API` não é necessária: sem ela, o front chama `/api` no próprio domínio.
 
-**3. Frontend** (Vercel): o jeito limpo é apontar o **Root Directory = `web`**
-nas configurações do projeto Vercel — assim a Vercel vê só o app Vite e nunca o
-`requirements.txt` da raiz (que dispararia o builder Python por engano).
-Como rede de segurança, há um `vercel.json` na raiz que força o build só do
-frontend (`framework: null`, build de `web/`), caso o Root Directory fique na raiz.
-Defina a variável de ambiente:
-```
-VITE_SONDA_API = https://<seu-backend>.fly.dev
-```
+**3. Esquema e dados iniciais.** Crie o segredo `SONDA_DATABASE_URL` no GitHub
+(Settings → Secrets → Actions) e dispare o workflow **Seed do banco (manual)**.
+Ele se recusa a rodar se o banco já tiver cruzamentos.
 
-Variáveis em `.env.example`. CORS já está liberado na API para o frontend.
+Arranque a frio medido localmente: 1,5–3 s na primeira chamada de cada rota de
+leitura (download da FSA e da extensão httpfs); depois, ~0,03 s.
+
+Alternativa sem Vercel para a API: o `Dockerfile` e o `fly.toml` continuam válidos
+(`fly deploy --build-arg SONDA_FSA_URL=…`); aí defina `VITE_SONDA_API` e o CORS
+(`SONDA_CORS_ORIGINS`, `SONDA_CORS_ORIGIN_REGEX`), desnecessário no mesmo domínio.
+
+Variáveis em `.env.example`.
 
 ### Cron de ingestão
 

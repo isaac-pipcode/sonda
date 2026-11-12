@@ -8,11 +8,17 @@ WORKDIR /app
 COPY requirements-backend.txt .
 RUN pip install --no-cache-dir -r requirements-backend.txt
 
-# código do backend + esquema + fixtures/seed + base FSA (lida in-place)
+# código do backend + esquema + fixtures/seed
 COPY sonda/ ./sonda/
 COPY schema.sql seed.py ./
 COPY fixtures/ ./fixtures/
-COPY data/ ./data/
+COPY data/fsa.db.sha256 ./data/
+COPY baixar_fsa.py ./
+
+# base FSA hospedada fora do git: baixada no build e conferida pelo pin (sha256).
+# Sem SONDA_FSA_URL a imagem sobe sem a FSA (a API responde 404 nas rotas /api/fsa).
+ARG SONDA_FSA_URL
+RUN if [ -n "$SONDA_FSA_URL" ]; then python baixar_fsa.py; fi
 
 ENV PYTHONUNBUFFERED=1
 # plataformas (Fly/Render/Railway) injetam PORT; default 8000.

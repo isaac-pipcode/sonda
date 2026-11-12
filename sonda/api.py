@@ -7,14 +7,18 @@ temporal só cresce.
 """
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+import duckdb
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
-from . import engine, fsa, percurso as percurso_mod
+from . import engine, fsa, funil as funil_mod, percurso as percurso_mod, ridab, series as series_mod, territorio as territorio_mod
+from .config import CONFIG
 from .db import connect, init_schema
 from .provenance import agora_utc, envelope, fixity
 
@@ -24,17 +28,40 @@ app = FastAPI(
     "Carbono ancora. Sinal interfere. Sonar lê.",
     version="0.1.0",
 )
-# CORS liberado para o SondaApp.jsx em desenvolvimento.
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+
+def opcoes_cors(origens: tuple[str, ...], regex: str = "") -> dict:
+    """Argumentos do CORSMiddleware. Sem origens nem regex configurados, libera "*"
+    (desenvolvimento); com qualquer um dos dois, só as origens declaradas passam.
+    O front só usa GET e POST com Content-Type: json; nada além disso é liberado."""
+    if not origens and not regex:
+        return {"allow_origins": ["*"], "allow_methods": ["*"], "allow_headers": ["*"]}
+    return {"allow_origins": list(origens), "allow_origin_regex": regex or None,
+            "allow_methods": ["GET", "POST", "OPTIONS"], "allow_headers": ["Content-Type"]}
+
+
+def aviso_cors(origens: tuple[str, ...], regex: str = "") -> Optional[str]:
+    """Mensagem de alerta quando o CORS está aberto a qualquer origem; None se restrito."""
+    if origens or regex:
+        return None
+    return ("CORS aberto a qualquer origem (SONDA_CORS_ORIGINS e SONDA_CORS_ORIGIN_REGEX vazias). "
+            "Aceitável em desenvolvimento; em produção, declare as origens do front.")
+
+
+# CORS por ambiente: SONDA_CORS_ORIGINS / SONDA_CORS_ORIGIN_REGEX (ver .env.example).
+app.add_middleware(CORSMiddleware, **opcoes_cors(CONFIG.cors_origens, CONFIG.cors_origem_regex))
+
+
+@app.exception_handler(FileNotFoundError)
+def _base_ausente(_: Request, e: FileNotFoundError) -> JSONResponse:
+    """Base local ausente (ex.: FSA não baixada) é indisponibilidade, não erro interno."""
+    return JSONResponse(status_code=503, content={"detail": f"base indisponível: {e}"})
 
 
 @app.on_event("startup")
 def _startup() -> None:
+    if (aviso := aviso_cors(CONFIG.cors_origens, CONFIG.cors_origem_regex)):
+        logging.getLogger("uvicorn.error").warning(aviso)
     # idempotente; garante o esquema no primeiro boot.
     try:
         init_schema()
@@ -67,6 +94,7 @@ class ReceitaIn(BaseModel):
     versoes_fonte: list[str] = []
     base_faltante: Optional[BaseFaltante] = None
     versao_regra: str = "v1"
+    justificativa: Optional[str] = Field(None, max_length=1000, description="por que a regra foi alterada (bifurcação)")
 
 
 # ── raiz ────────────────────────────────────────────────────────────────────
@@ -78,7 +106,9 @@ def raiz():
             "lema": "Carbono ancora. Sinal interfere. Sonar lê.",
             "recursos": ["/api/catalogo", "/api/raw/{base}", "/api/snapshots",
                          "/api/cruzamentos", "/api/percursos", "/api/fsa/tabelas",
-                         "/api/fsa/dicionario", "/api/fsa/consulta/{nome}"],
+                         "/api/fsa/dicionario", "/api/fsa/consulta/{nome}",
+                         "/api/ridab/contratos-enriquecidos", "/api/series",
+                         "/api/territorio", "/api/ligacoes/funil"],
         },
         proveniencia={"fonte": "sonda", "nota": "infraestrutura, não fonte primária"},
     )
@@ -135,6 +165,8 @@ def catalogo():
             "base": r["base"],
             "entidade_nativa": r["entidade"],  # termo da base, NÃO reconciliado
             "n_registros": r["n"],
+            "unidade_registro": "registros",
+            "ordem": 1,  # coletada da fonte pela Sonda
             "ultimo_registro": str(r["ultimo_registro"]),
         }
         for r in rows
@@ -144,17 +176,33 @@ def catalogo():
     if fsa.disponivel():
         inv = fsa.inventario()["itens"]
         prov_fsa = fsa.proveniencia_base()  # calcula fixity uma vez
+        contratos = next((i["registros"] for i in inv if i["nome"] == "fato_contrato_serie"), None)
         catalogo_dados.append({
             "base": fsa.BASE,
             "entidade_nativa": "base_relacional_fsa (fatos · dimensões · visões)",
-            "n_registros": sum(i["registros"] or 0 for i in inv),
+            # soma de tabelas e visões não é contagem de nada: o número é o da tabela-fato principal.
+            "n_registros": contratos,
+            "unidade_registro": "contratos",
+            "ordem": 2,  # base de pesquisa já constituída
             "tabelas_e_visoes": len(inv),
             "acesso": "/api/fsa/tabelas · /api/fsa/dicionario · /api/fsa/consulta/{nome}",
+            "proveniencia": prov_fsa,
         })
         prov_por_base.setdefault(prov_fsa["fonte"], []).append(
             {"instancia_versao": prov_fsa["instancia_versao"],
              "entidade": "base_relacional_fsa", "fixity": prov_fsa["fixity"]}
         )
+    # RIDAB: dados oficiais tratados por terceiros, lidos remotamente na revisão fixada.
+    catalogo_dados.append({
+        "base": ridab.BASE,
+        "entidade_nativa": "parquet_remoto_ridab (dados oficiais tratados por terceiros)",
+        "n_registros": len(ridab.TABELAS),
+        "unidade_registro": "tabelas lidas pela Sonda",
+        "ordem": 3,
+        "tabelas_lidas": sorted(ridab.TABELAS),
+        "acesso": "/api/ridab/contratos-enriquecidos · /api/series · /api/territorio",
+        "proveniencia": ridab.proveniencia_base(com_sha=False),
+    })
     return envelope(
         catalogo_dados,
         proveniencia=[{"fonte": k, "snapshots": v} for k, v in prov_por_base.items()],
@@ -217,7 +265,7 @@ def snapshots():
 # ── base FSA: dataset de segunda ordem lido in-place (na língua própria) ──────
 def _exige_fsa():
     if not fsa.disponivel():
-        raise HTTPException(404, "base FSA indisponível (defina SONDA_FSA_DB ou inclua data/fsa.db)")
+        raise HTTPException(404, f"base FSA indisponível — {fsa.motivo_indisponivel()}")
 
 
 @app.get("/api/fsa/tabelas")
@@ -256,6 +304,88 @@ def fsa_consulta(nome: str, limite: int = 50, pagina: int = 1):
         proveniencia=prov,
         avisos=[f"página {pagina} · {len(res['linhas'])} linhas · dado NATIVO da FSA, não reconciliado"],
     )
+
+
+# ── RIDAB: dataset de terceira ordem, Parquet remoto fixado por revisão ───────
+@app.get("/api/ridab/contratos-enriquecidos")
+def ridab_contratos_enriquecidos(limite: int = 50, pagina: int = 1):
+    """Contratos da FSA + código IBGE do proponente + valores em R$ de 2024.
+
+    Visão calculada na consulta (nada gravado). Proveniência das DUAS bases lado
+    a lado; ressalvas das colunas derivadas viajam junto com o dado.
+    """
+    _exige_fsa()
+    try:
+        res = ridab.enriquecer_contratos(limite=limite, pagina=pagina)
+    except duckdb.IOException as e:
+        raise HTTPException(502, f"RIDAB indisponível ({type(e).__name__}); verifique a rede")
+    prov = [fsa.proveniencia_base(),
+            ridab.proveniencia_base(["agentes_economicos", "deflator_ipca"])]
+    prov[0]["ressalvas"] = {k: v for k, v in res["ressalvas"].items() if k not in ridab.RESSALVAS}
+    prov[1]["ressalvas"] = {k: v for k, v in res["ressalvas"].items() if k in ridab.RESSALVAS}
+    return envelope(
+        {"colunas": res["colunas"], "linhas": res["linhas"], "total": res["total"],
+         "com_codigo_ibge": res["com_codigo_ibge"]},
+        proveniencia=prov,
+        avisos=[f"página {pagina} · {len(res['linhas'])} linhas · "
+                f"{res['com_codigo_ibge']}/{res['total']} contratos com código IBGE · "
+                "município do cadastro ATUAL; valores nominais da FSA preservados"],
+    )
+
+
+# ── séries anuais: o tempo como único eixo comum (incomensurabilidade) ────────
+@app.get("/api/series")
+def series_anuais(de: int = 2009, ate: int = 2026, moeda: str = "real"):
+    """Cinco séries anuais (FSA e RIDAB), cada uma na sua unidade e escala.
+
+    `moeda`: "real" (R$ de 2024) ou "nominal" (R$ correntes). Ano sem dado é
+    nulo, nunca zero; cada série traz cobertura, ressalvas e o que ficou de fora.
+    """
+    _exige_fsa()
+    try:
+        res = series_mod.calcular(de, ate, moeda)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except duckdb.IOException as e:
+        raise HTTPException(502, f"RIDAB indisponível ({type(e).__name__}); verifique a rede")
+    prov = [fsa.proveniencia_base(), ridab.proveniencia_base(list(series_mod.TABELAS_RIDAB))]
+    return envelope(res, proveniencia=prov, avisos=res["avisos"])
+
+
+@app.get("/api/territorio")
+def territorio(moeda: str = "real"):
+    """Fomento contratado do FSA e salas de exibição por UF (da produtora proponente).
+
+    Partes calculadas sobre os contratos com UF; os sem UF vêm à parte. População
+    inconsistente é sinalizada em `verificar`, não corrigida em silêncio.
+    """
+    _exige_fsa()
+    try:
+        res = territorio_mod.calcular(moeda)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except duckdb.IOException as e:
+        raise HTTPException(502, f"RIDAB indisponível ({type(e).__name__}); verifique a rede")
+    prov = [fsa.proveniencia_base(), ridab.proveniencia_base(["deflator_ipca"])]
+    return envelope(res, proveniencia=prov, avisos=res["ressalvas"])
+
+
+@app.get("/api/ligacoes/funil")
+def ligacoes_funil():
+    """Do contrato do FSA à obra (CPB) e à bilheteria: o que liga, o que sobra e o elo ausente.
+
+    Órfãos são achado, nunca filtro: cada salto devolve os segmentos exclusivos e a
+    confiança do vínculo.
+    """
+    _exige_fsa()
+    res = funil_mod.calcular()
+    return envelope(res, proveniencia=fsa.proveniencia_base(), avisos=res["ressalvas"])
+
+
+@app.post("/api/ridab/registrar")
+def ridab_registrar():
+    """Registra o RIDAB como snapshot imutável (referência: revisão + sha256)."""
+    return envelope(ridab.registrar_snapshot(), proveniencia=ridab.proveniencia_base())
 
 
 @app.post("/api/fsa/registrar")
