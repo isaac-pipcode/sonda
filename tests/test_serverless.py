@@ -57,3 +57,11 @@ def test_motivo_explica_a_indisponibilidade(monkeypatch, tmp_path):
     _config(monkeypatch, tmp_path, (tmp_path / "nao_existe").as_uri())
     fsa.disponivel()
     assert "falha ao baixar" in fsa.motivo_indisponivel()
+
+
+def test_sem_variavel_usa_a_release_publica_e_string_vazia_desliga(monkeypatch):
+    from sonda.config import FSA_URL_PADRAO
+    monkeypatch.delenv("SONDA_FSA_URL", raising=False)
+    assert Config.from_env().fsa_url == FSA_URL_PADRAO
+    monkeypatch.setenv("SONDA_FSA_URL", "")
+    assert Config.from_env().fsa_url == ""

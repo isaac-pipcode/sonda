@@ -175,11 +175,9 @@ Vercel ─┬─ web/dist (SondaApp.jsx, estático)
 Neon. A API lê `SONDA_DATABASE_URL` e, na falta dela, `DATABASE_URL`/`POSTGRES_URL`
 (as que a integração cria). Use a connection string **pooled** (host com `-pooler`).
 
-**2. Variáveis na Vercel** (Production e Preview):
-```
-SONDA_FSA_URL = https://github.com/isaac-pipcode/sonda/releases/download/fsa.db/fsa.db
-DATABASE_URL  = (criada pela integração Neon, ou cole a pooled)
-```
+**2. Variáveis na Vercel** (Production e Preview): só `DATABASE_URL`, criada pela
+integração Neon (ou cole a pooled). A `fsa.db` vem por padrão da release pública
+deste repositório, conferida pelo pin; `SONDA_FSA_URL` só serve para trocar a fonte.
 `VITE_SONDA_API` não é necessária: sem ela, o front chama `/api` no próprio domínio.
 
 **3. Esquema e dados iniciais.** Crie o segredo `SONDA_DATABASE_URL` no GitHub

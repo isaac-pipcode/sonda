@@ -9,6 +9,10 @@ import os
 from dataclasses import dataclass
 
 
+# Release pública deste repositório; o conteúdo é conferido pelo pin data/fsa.db.sha256.
+FSA_URL_PADRAO = "https://github.com/isaac-pipcode/sonda/releases/download/fsa.db/fsa.db"
+
+
 @dataclass(frozen=True)
 class Config:
     database_url: str
@@ -42,7 +46,8 @@ class Config:
                           or os.environ.get("POSTGRES_URL") or "postgresql://sonda:sonda@localhost:5432/sonda"),
             pool_max=int(os.environ.get("SONDA_POOL_MAX", "10")),
             fsa_db_path=os.environ.get("SONDA_FSA_DB", "/tmp/sonda/fsa.db" if serverless else "data/fsa.db"),
-            fsa_url=os.environ.get("SONDA_FSA_URL", "").strip(),
+            # padrão: a release pública; SONDA_FSA_URL="" desliga o download.
+            fsa_url=os.environ.get("SONDA_FSA_URL", FSA_URL_PADRAO).strip(),
             duckdb_dir=os.environ.get("SONDA_DUCKDB_DIR", "/tmp/sonda/duckdb" if serverless else ""),
             ridab_revisao=os.environ.get(
                 "SONDA_RIDAB_REV", "6c5e6ae1ce5a866b76039e1f3dce7776cf22dfe1"),
