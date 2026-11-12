@@ -47,4 +47,13 @@ def test_download_falho_nao_derruba_e_registra_aviso(monkeypatch, tmp_path, capl
     destino = _config(monkeypatch, tmp_path, (tmp_path / "nao_existe").as_uri())
     with caplog.at_level(logging.WARNING, logger="uvicorn.error"):
         assert not fsa.disponivel()
-    assert not destino.exists() and any("não foi possível baixar" in r.message for r in caplog.records)
+    assert not destino.exists() and any("falha ao baixar" in r.getMessage() for r in caplog.records)
+
+
+def test_motivo_explica_a_indisponibilidade(monkeypatch, tmp_path):
+    _config(monkeypatch, tmp_path, "")
+    fsa.disponivel()
+    assert "SONDA_FSA_URL não está definida" in fsa.motivo_indisponivel()
+    _config(monkeypatch, tmp_path, (tmp_path / "nao_existe").as_uri())
+    fsa.disponivel()
+    assert "falha ao baixar" in fsa.motivo_indisponivel()

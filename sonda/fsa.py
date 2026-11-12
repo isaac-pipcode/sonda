@@ -38,14 +38,21 @@ _trava_download = threading.Lock()
 _log = logging.getLogger("uvicorn.error")
 
 
+_motivo: Optional[str] = None  # por que a base está indisponível (diagnóstico do deploy)
+
+
 def garantir() -> bool:
     """True se a base estiver no disco. Se faltar e `SONDA_FSA_URL` estiver definida,
     baixa-a uma vez (conferida pelo pin) — caso da função serverless, que nasce sem
-    disco persistente. Falha de rede não derruba a API: a base fica indisponível."""
+    disco persistente. Falha de rede não derruba a API: a base fica indisponível e
+    `motivo_indisponivel()` diz por quê."""
+    global _motivo
     destino = caminho_db()
     if destino.exists():
+        _motivo = None
         return True
     if not CONFIG.fsa_url:
+        _motivo = f"SONDA_FSA_URL não está definida neste ambiente e {destino} não existe"
         return False
     from .baixa import baixar, hash_esperado
 
@@ -54,10 +61,17 @@ def garantir() -> bool:
             return True
         try:
             baixar(CONFIG.fsa_url, destino, hash_esperado())
-        except Exception as e:  # rede, 404 ou hash divergente: a base fica indisponível
-            _log.warning("FSA: não foi possível baixar %s — %s", CONFIG.fsa_url, e)
+        except Exception as e:  # rede, 404, pin ausente ou hash divergente
+            _motivo = f"falha ao baixar {CONFIG.fsa_url} para {destino}: {type(e).__name__}: {e}"
+            _log.warning("FSA: %s", _motivo)
             return False
+    _motivo = None
     return True
+
+
+def motivo_indisponivel() -> Optional[str]:
+    """Último motivo registrado para a base estar indisponível (None se disponível)."""
+    return _motivo
 
 
 def disponivel() -> bool:
@@ -76,7 +90,7 @@ def fixity_arquivo() -> str:
 # ── inventário e dicionário (a base é autodescritiva) ───────────────────────
 def _conn_sqlite() -> sqlite3.Connection:
     if not garantir():
-        raise FileNotFoundError(f"base FSA não encontrada em {caminho_db()}")
+        raise FileNotFoundError(f"base FSA indisponível — {_motivo}")
     con = sqlite3.connect(f"file:{caminho_db()}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
     return con

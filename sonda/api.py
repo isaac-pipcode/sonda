@@ -265,7 +265,7 @@ def snapshots():
 # ── base FSA: dataset de segunda ordem lido in-place (na língua própria) ──────
 def _exige_fsa():
     if not fsa.disponivel():
-        raise HTTPException(404, "base FSA indisponível (defina SONDA_FSA_URL ou SONDA_FSA_DB)")
+        raise HTTPException(404, f"base FSA indisponível — {fsa.motivo_indisponivel()}")
 
 
 @app.get("/api/fsa/tabelas")
