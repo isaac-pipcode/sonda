@@ -39,6 +39,8 @@ export const SondaAPI = {
   snapshots: () => get("/api/snapshots"),
   raw: (base, { entidade, limite = 50, pagina = 1 } = {}) =>
     get(`/api/raw/${base}?limite=${limite}&pagina=${pagina}` + (entidade ? `&entidade=${encodeURIComponent(entidade)}` : "")),
+  // endereço direto dos registros brutos de uma base (para download)
+  urlRaw: (base, limite = 500) => `${BASE}/api/raw/${base}?limite=${limite}`,
   cruzamentos: () => get("/api/cruzamentos"),
   cruzamento: (id) => get(`/api/cruzamentos/${id}`),
   executar: (id) => post(`/api/cruzamentos/${id}/executar`),

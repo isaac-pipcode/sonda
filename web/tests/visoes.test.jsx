@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, act, waitFor } from "@testing-library/react";
 import SondaApp from "../../SondaApp.jsx";
 
-const IDS = ["painel", "territorio", "ligacoes", "catalogo", "percurso", "trajetoria", "cruzamentos"];
+const IDS = ["indicadores/investimento", "indicadores/territorio", "indicadores/telas", "cruzar/cruzamentos",
+  "cruzar/encadear", "cruzar/historico", "cruzar/chaves", "bases/catalogo"];
 const envelope = (dados) => ({ ok: true, status: 200, json: async () => ({ dados, proveniencia: [], avisos: [], servido_em: "" }) });
 
 beforeEach(() => { window.scrollTo = () => {}; window.location.hash = ""; });
@@ -27,19 +28,28 @@ describe.each([
 });
 
 describe("rotas por hash", () => {
-  it("hash desconhecido cai no Painel", () => {
+  it("hash desconhecido cai na tela inicial", () => {
     vi.stubGlobal("fetch", vi.fn(async () => envelope([])));
     window.location.hash = "/inexistente";
     render(<SondaApp />);
-    expect(document.querySelector("[aria-current=page]").textContent).toBe("PAINEL");
+    expect(document.querySelector("nav [aria-current=page]").textContent).toBe("Consultar indicadores");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/Quanto se investe/);
+  });
+
+  it("endereços antigos continuam valendo", () => {
+    vi.stubGlobal("fetch", vi.fn(async () => envelope([])));
+    window.location.hash = "/trajetoria";
+    render(<SondaApp />);
+    expect(document.querySelector("nav [aria-current=page]").textContent).toBe("Cruzar bases");
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toMatch(/Histórico/);
   });
 
   it("clicar na navegação grava o hash, e mudar o hash troca a visão", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => envelope([])));
     render(<SondaApp />);
-    await act(async () => { screen.getByRole("button", { name: "PERCURSO" }).click(); });
-    expect(window.location.hash).toBe("#/percurso");
-    await act(async () => { window.location.hash = "/cruzamentos"; window.dispatchEvent(new HashChangeEvent("hashchange")); });
-    expect(document.querySelector("[aria-current=page]").textContent).toBe("CRUZAMENTOS");
+    await act(async () => { screen.getByRole("button", { name: "Cruzar bases" }).click(); });
+    expect(window.location.hash).toBe("#/cruzar/cruzamentos");
+    await act(async () => { window.location.hash = "/bases/catalogo"; window.dispatchEvent(new HashChangeEvent("hashchange")); });
+    expect(document.querySelector("nav [aria-current=page]").textContent).toBe("Baixar e citar");
   });
 });
