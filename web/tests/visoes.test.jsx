@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, act, waitFor } from "@testing-library/react";
 import SondaApp from "../../SondaApp.jsx";
 
-const IDS = ["indicadores/investimento", "indicadores/territorio", "indicadores/telas", "cruzar/cruzamentos",
+const IDS = ["indicadores/investimento", "indicadores/obras", "indicadores/territorio", "indicadores/telas", "cruzar/cruzamentos",
   "cruzar/encadear", "cruzar/historico", "cruzar/chaves", "bases/catalogo"];
 const envelope = (dados) => ({ ok: true, status: 200, json: async () => ({ dados, proveniencia: [], avisos: [], servido_em: "" }) });
 

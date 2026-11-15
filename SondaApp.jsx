@@ -299,6 +299,249 @@ function Investimento() {
   );
 }
 
+// ============ INDICADORES · por filme: uma linha por obra, medidas escolhidas pela pesquisadora ============
+const MEDIDAS = [
+  { id: "publico", rotulo: "Público (espectadores)", curto: "Público", casas: 0 },
+  { id: "renda", rotulo: "Renda de bilheteria (R$)", curto: "Renda R$", casas: 0 },
+  { id: "fsa_contratado", rotulo: "FSA contratado (R$)", curto: "FSA contratado R$", casas: 0 },
+  { id: "fsa_liberado", rotulo: "FSA liberado (R$)", curto: "FSA liberado R$", casas: 0 },
+  { id: "fsa_comercializacao", rotulo: "FSA em comercialização (R$)", curto: "FSA comercialização R$", casas: 0 },
+  { id: "captado", rotulo: "Captado por incentivo fiscal (R$)", curto: "Captado R$", casas: 0 },
+];
+const MEDIDA = Object.fromEntries(MEDIDAS.map((m) => [m.id, m]));
+const POR_PAGINA = 50;
+
+// correlação de postos (Spearman), com empates pela média dos postos.
+function postos(v) {
+  const ord = v.map((x, i) => [x, i]).sort((a, b) => a[0] - b[0]);
+  const r = new Array(v.length);
+  for (let i = 0; i < ord.length;) {
+    let j = i;
+    while (j + 1 < ord.length && ord[j + 1][0] === ord[i][0]) j++;
+    for (let k = i; k <= j; k++) r[ord[k][1]] = (i + j) / 2 + 1;
+    i = j + 1;
+  }
+  return r;
+}
+function spearman(xs, ys) {
+  const n = xs.length;
+  if (n < 3) return null;
+  const rx = postos(xs), ry = postos(ys);
+  const m = (n + 1) / 2;
+  let num = 0, dx = 0, dy = 0;
+  for (let i = 0; i < n; i++) { num += (rx[i] - m) * (ry[i] - m); dx += (rx[i] - m) ** 2; dy += (ry[i] - m) ** 2; }
+  return dx && dy ? num / Math.sqrt(dx * dy) : null;
+}
+const curtoNum = (v) => {
+  const a = Math.abs(v);
+  if (a >= 1e9) return `${fmtNum(v / 1e9, 1)} bi`;
+  if (a >= 1e6) return `${fmtNum(v / 1e6, a >= 1e7 ? 0 : 1)} mi`;
+  if (a >= 1e3) return `${fmtNum(v / 1e3, 0)} mil`;
+  return fmtNum(v, 0);
+};
+
+function Dispersao({ linhas, x, y, log, sel, aoSel }) {
+  const W = 760, H = 420, E = 64, B = 44, T = 12, D = 14;
+  const pts = linhas.filter((o) => o[x] != null && o[y] != null && (!log || (o[x] > 0 && o[y] > 0)));
+  const fora = linhas.filter((o) => o[x] != null && o[y] != null).length - pts.length;
+  const tr = (v) => (log ? Math.log10(v) : v);
+  const ext = (k) => {
+    const vs = pts.map((o) => tr(o[k]));
+    let a = Math.min(...vs), b = Math.max(...vs);
+    if (!isFinite(a)) { a = 0; b = 1; }
+    if (a === b) { a -= 1; b += 1; }
+    return [log ? Math.floor(a) : 0, log ? Math.ceil(b) : b * 1.05];
+  };
+  const [x0, x1] = ext(x), [y0, y1] = ext(y);
+  const px = (v) => E + ((tr(v) - x0) / (x1 - x0)) * (W - E - D);
+  const py = (v) => H - B - ((tr(v) - y0) / (y1 - y0)) * (H - B - T);
+  const ticks = (a, b) => (log ? Array.from({ length: b - a + 1 }, (_, i) => a + i) : [0, 0.25, 0.5, 0.75, 1].map((f) => a + (b - a) * f));
+  const rot = (v) => curtoNum(log ? 10 ** v : v);
+  const rho = spearman(pts.map((o) => o[x]), pts.map((o) => o[y]));
+  return (
+    <figure style={{ margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Dispersão de ${MEDIDA[y].rotulo} contra ${MEDIDA[x].rotulo}, ${pts.length} obras.`} style={{ width: "100%", height: "auto", display: "block" }}>
+        {ticks(x0, x1).map((v) => (
+          <g key={`x${v}`}>
+            <line x1={E + ((v - x0) / (x1 - x0)) * (W - E - D)} x2={E + ((v - x0) / (x1 - x0)) * (W - E - D)} y1={T} y2={H - B} stroke={S.linha} />
+            <text x={E + ((v - x0) / (x1 - x0)) * (W - E - D)} y={H - B + 18} textAnchor="middle" fontFamily="'IBM Plex Mono',monospace" fontSize="12" fill={S.mudo}>{rot(v)}</text>
+          </g>
+        ))}
+        {ticks(y0, y1).map((v) => (
+          <g key={`y${v}`}>
+            <line x1={E} x2={W - D} y1={H - B - ((v - y0) / (y1 - y0)) * (H - B - T)} y2={H - B - ((v - y0) / (y1 - y0)) * (H - B - T)} stroke={S.linha} />
+            <text x={E - 8} y={H - B - ((v - y0) / (y1 - y0)) * (H - B - T) + 4} textAnchor="end" fontFamily="'IBM Plex Mono',monospace" fontSize="12" fill={S.mudo}>{rot(v)}</text>
+          </g>
+        ))}
+        <line x1={E} x2={W - D} y1={H - B} y2={H - B} stroke={S.tinta} strokeWidth="1.5" />
+        <line x1={E} x2={E} y1={T} y2={H - B} stroke={S.tinta} strokeWidth="1.5" />
+        <text x={(E + W - D) / 2} y={H - 6} textAnchor="middle" fontSize="13" fill={S.tinta} fontFamily="'Archivo',sans-serif">{MEDIDA[x].rotulo}{log ? " · escala log" : ""}</text>
+        {pts.map((o) => (
+          <circle key={o.cpb} cx={px(o[x])} cy={py(o[y])} r={o.cpb === sel ? 7 : 3.5} fill={o.cpb === sel ? S.sinal : S.tinta} fillOpacity={o.cpb === sel ? 1 : 0.45}
+            stroke={o.cpb === sel ? S.papel : "none"} strokeWidth="2" style={{ cursor: "pointer" }}
+            onMouseEnter={() => aoSel(o.cpb)} onClick={() => aoSel(o.cpb)}>
+            <title>{o.titulo}</title>
+          </circle>
+        ))}
+      </svg>
+      <figcaption style={{ fontSize: 14, color: S.mudo, lineHeight: 1.5 }}>
+        Vertical: {MEDIDA[y].rotulo}. {fmtNum(pts.length, 0)} obras com as duas medidas{fora > 0 ? ` (${fmtNum(fora, 0)} com valor zero ficam fora da escala log)` : ""}.
+        {rho != null && <> Correlação de postos (Spearman): <strong style={{ color: S.tinta }}>{fmtNum(rho, 2)}</strong>. Descreve associação, não causa.</>}
+      </figcaption>
+    </figure>
+  );
+}
+
+function PorFilme() {
+  const { env, erro, carregando } = useEnvelope(() => SondaAPI.obras());
+  const todas = env?.dados?.obras || [];
+  const [busca, setBusca] = useState("");
+  const [uf, setUf] = useState("");
+  const [tipo, setTipo] = useState("");
+  const [de, setDe] = useState("");
+  const [ate, setAte] = useState("");
+  const [x, setX] = useState("captado");
+  const [y, setY] = useState("publico");
+  const [log, setLog] = useState(true);
+  const [ordem, setOrdem] = useState(["publico", -1]);
+  const [pagina, setPagina] = useState(0);
+  const [sel, setSel] = useState(null);
+
+  const ufs = [...new Set(todas.map((o) => o.uf).filter(Boolean))].sort();
+  const tipos = [...new Set(todas.map((o) => o.tipo).filter(Boolean))].sort();
+  const termo = busca.trim().toLowerCase();
+  const ano = (o) => o.ano_lancamento ?? o.ano_primeiro_contrato;
+  const linhas = todas.filter((o) =>
+    (!termo || [o.titulo, o.distribuidora, o.produtora].some((s) => s && s.toLowerCase().includes(termo)))
+    && (!uf || o.uf === uf) && (!tipo || o.tipo === tipo)
+    && (!de || (ano(o) ?? 0) >= +de) && (!ate || (ano(o) ?? 9999) <= +ate));
+  const [col, dir] = ordem;
+  const ordenadas = [...linhas].sort((a, b) => {
+    const va = a[col], vb = b[col];
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    return (typeof va === "string" ? va.localeCompare(vb) : va - vb) * dir;
+  });
+  const paginas = Math.max(1, Math.ceil(ordenadas.length / POR_PAGINA));
+  const pg = Math.min(pagina, paginas - 1);
+  const visiveis = ordenadas.slice(pg * POR_PAGINA, (pg + 1) * POR_PAGINA);
+  const obraSel = todas.find((o) => o.cpb === sel);
+  const filtro = (f) => (v) => { f(v); setPagina(0); };
+  const campo = { minHeight: 44, border: `1px solid ${S.tinta}`, background: S.papel, padding: "0 10px", fontFamily: FONTE_UI, fontSize: 15, color: S.tinta };
+  const rotulo = { display: "flex", flexDirection: "column", gap: 4, fontSize: 14, color: S.mudo };
+  const colunas = [["titulo", "Obra"], ["ano_lancamento", "Lançamento"], ["uf", "UF"], ...MEDIDAS.map((m) => [m.id, m.curto])];
+  const csv = () => baixarCSV("sonda_obras.csv",
+    ["cpb", "titulo", "tipo", "ano_lancamento", "uf_proponente_fsa", "proponente_fsa", "distribuidora", "publico", "renda_R$", "contratos_fsa",
+      "fsa_contratado_R$", "fsa_liberado_R$", "fsa_comercializacao_R$", "projetos_incentivo", "captado_R$", "captado_compartilhado"],
+    ordenadas.map((o) => [o.cpb, o.titulo, o.tipo, o.ano_lancamento, o.uf, o.produtora, o.distribuidora, o.publico, o.renda, o.contratos_fsa,
+      o.fsa_contratado, o.fsa_liberado, o.fsa_comercializacao, o.projetos_incentivo, o.captado, o.captado_compartilhado ? "sim" : ""]));
+  const prov = Array.isArray(env?.proveniencia) ? env.proveniencia : [];
+  const citacao = `SONDA — Observatório de Dados e Políticas do Audiovisual (UFF). Obras do audiovisual brasileiro: bilheteria, FSA e incentivo fiscal. Fontes: ${prov.map((p) => `${p.fonte} (versão ${String(p.instancia_versao).slice(0, 12)})`).join("; ")}. Consultado em ${hoje()}.`;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 24, fontFamily: FONTE_UI }}>
+      <TituloTela titulo="Filme a filme" sub="Bilheteria, FSA e incentivo fiscal de cada obra. Filtre, compare duas medidas no gráfico e baixe a tabela.">
+        {env && <button type="button" onClick={csv} style={BTN_LEVE}>Baixar CSV ({fmtNum(ordenadas.length, 0)} obras)</button>}
+        {env && <CopiarCitacao texto={citacao} />}
+      </TituloTela>
+
+      <Estado carregando={carregando && !env} erro={erro} vazio={todas.length === 0} vazioMsg="Nenhuma obra disponível no momento.">
+        <section aria-label="Filtros" style={{ display: "flex", flexWrap: "wrap", gap: "12px 16px", alignItems: "flex-end" }}>
+          <label style={{ ...rotulo, flex: "1 1 260px" }}>Buscar título, produtora ou distribuidora
+            <input type="search" value={busca} onChange={(e) => filtro(setBusca)(e.target.value)} style={campo} />
+          </label>
+          <label style={rotulo}>UF (proponente do FSA)
+            <select value={uf} onChange={(e) => filtro(setUf)(e.target.value)} style={campo}><option value="">Todas</option>{ufs.map((u) => <option key={u}>{u}</option>)}</select>
+          </label>
+          <label style={rotulo}>Tipo
+            <select value={tipo} onChange={(e) => filtro(setTipo)(e.target.value)} style={campo}><option value="">Todos</option>{tipos.map((u) => <option key={u}>{u}</option>)}</select>
+          </label>
+          <label style={rotulo}>Ano de
+            <input type="number" inputMode="numeric" min="1995" max="2026" value={de} onChange={(e) => filtro(setDe)(e.target.value)} style={{ ...campo, width: 96 }} />
+          </label>
+          <label style={rotulo}>até
+            <input type="number" inputMode="numeric" min="1995" max="2026" value={ate} onChange={(e) => filtro(setAte)(e.target.value)} style={{ ...campo, width: 96 }} />
+          </label>
+          <span role="status" style={{ fontSize: 14.5, minHeight: 44, display: "flex", alignItems: "center" }}>{fmtNum(linhas.length, 0)} de {fmtNum(todas.length, 0)} obras</span>
+        </section>
+
+        <section aria-label="Comparar duas medidas" style={{ display: "flex", flexWrap: "wrap", gap: "20px 32px", alignItems: "flex-start" }}>
+          <div style={{ flex: "2 1 520px", minWidth: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px 16px", alignItems: "flex-end" }}>
+              <label style={rotulo}>Eixo horizontal
+                <select value={x} onChange={(e) => setX(e.target.value)} style={campo}>{MEDIDAS.map((m) => <option key={m.id} value={m.id}>{m.rotulo}</option>)}</select>
+              </label>
+              <label style={rotulo}>Eixo vertical
+                <select value={y} onChange={(e) => setY(e.target.value)} style={campo}>{MEDIDAS.map((m) => <option key={m.id} value={m.id}>{m.rotulo}</option>)}</select>
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 44, fontSize: 14.5 }}>
+                <input type="checkbox" checked={log} onChange={(e) => setLog(e.target.checked)} style={{ width: 20, height: 20 }} /> Escala logarítmica
+              </label>
+            </div>
+            <Dispersao linhas={linhas} x={x} y={y} log={log} sel={sel} aoSel={setSel} />
+          </div>
+          <aside aria-label="Obra selecionada" aria-live="polite" style={{ flex: "1 1 260px", minWidth: 0, borderTop: `4px solid ${S.tinta}`, paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+            {!obraSel && <p style={{ margin: 0, fontSize: 15, color: S.mudo }}>Passe o cursor sobre um ponto ou clique numa linha da tabela para ver a obra.</p>}
+            {obraSel && (
+              <>
+                <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700, lineHeight: 1.2 }}>{obraSel.titulo}</h2>
+                <span style={{ fontSize: 14, color: S.mudo }}>{[obraSel.tipo, obraSel.ano_lancamento, obraSel.uf, obraSel.distribuidora].filter(Boolean).join(" · ")}</span>
+                <dl style={{ margin: 0, display: "grid", gridTemplateColumns: "1fr auto", gap: "6px 12px", fontSize: 14.5 }}>
+                  {MEDIDAS.map((m) => (
+                    <React.Fragment key={m.id}>
+                      <dt>{m.rotulo}</dt>
+                      <dd style={{ margin: 0, fontFamily: FONTE_NUM, textAlign: "right" }}>{obraSel[m.id] == null ? "—" : fmtNum(obraSel[m.id], 0)}</dd>
+                    </React.Fragment>
+                  ))}
+                </dl>
+                {obraSel.captado_compartilhado && <p style={{ margin: 0, fontSize: 13.5, color: S.sinalTxt }}>O valor captado é de um projeto que cobre mais de uma obra.</p>}
+                <span style={{ fontFamily: FONTE_NUM, fontSize: 12.5, color: S.mudo }}>CPB {obraSel.cpb}</span>
+              </>
+            )}
+          </aside>
+        </section>
+
+        <section aria-label="Tabela de obras" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1100, fontSize: 14 }}>
+              <caption style={{ position: "absolute", left: -9999 }}>Obras, com as medidas de cada base</caption>
+              <thead>
+                <tr style={{ borderBottom: `2px solid ${S.tinta}` }}>
+                  {colunas.map(([id, r]) => (
+                    <th key={id} scope="col" aria-sort={col === id ? (dir > 0 ? "ascending" : "descending") : "none"} style={{ textAlign: id === "titulo" || id === "uf" ? "left" : "right", padding: 0 }}>
+                      <button type="button" onClick={() => { setOrdem([id, col === id ? -dir : id === "titulo" || id === "uf" ? 1 : -1]); setPagina(0); }}
+                        style={{ minHeight: 44, width: "100%", padding: "6px 8px", border: "none", background: "transparent", fontFamily: FONTE_UI, fontWeight: 700, fontSize: 14, textAlign: "inherit", cursor: "pointer", color: S.tinta }}>
+                        {r}{col === id ? (dir > 0 ? " ▲" : " ▼") : ""}
+                      </button>
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {visiveis.map((o) => (
+                  <tr key={o.cpb} onClick={() => setSel(o.cpb)} style={{ borderBottom: `1px solid ${S.linha}`, background: o.cpb === sel ? S.painel : "transparent", cursor: "pointer" }}>
+                    <th scope="row" style={{ textAlign: "left", fontWeight: 600, padding: "8px" }}>{o.titulo}</th>
+                    <td style={{ padding: "8px", textAlign: "right", fontFamily: FONTE_NUM }}>{o.ano_lancamento ?? "—"}</td>
+                    <td style={{ padding: "8px", fontFamily: FONTE_NUM }}>{o.uf ?? "—"}</td>
+                    {MEDIDAS.map((m) => <td key={m.id} style={{ padding: "8px", textAlign: "right", fontFamily: FONTE_NUM, color: o[m.id] == null ? S.hachura : S.tinta }}>{o[m.id] == null ? "—" : fmtNum(o[m.id], 0)}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", fontSize: 14.5 }}>
+            <button type="button" disabled={pg === 0} onClick={() => setPagina(pg - 1)} style={{ ...BTN_LEVE, opacity: pg === 0 ? 0.4 : 1 }}>← Anteriores</button>
+            <span>Página {pg + 1} de {paginas}</span>
+            <button type="button" disabled={pg >= paginas - 1} onClick={() => setPagina(pg + 1)} style={{ ...BTN_LEVE, opacity: pg >= paginas - 1 ? 0.4 : 1 }}>Seguintes →</button>
+          </div>
+        </section>
+        <Notas itens={env?.dados?.ressalvas} />
+      </Estado>
+    </div>
+  );
+}
+
 // ============ TERRITÓRIO: fomento do FSA e salas de exibição, por UF ============
 // Cartograma de quadrados iguais: indica posição, não área. [coluna, linha] em grade 7 × 8.
 const GRADE = {
@@ -1360,6 +1603,7 @@ function Mono({ cor, children }) {
 const AREAS = [
   { id: "indicadores", rotulo: "Consultar indicadores", telas: [
     { id: "investimento", rotulo: "Quanto se investe e se vê", comp: Investimento },
+    { id: "obras", rotulo: "Filme a filme", comp: PorFilme },
     { id: "territorio", rotulo: "Onde", comp: Territorio },
     { id: "telas", rotulo: "O que chega às telas", comp: Ligacoes },
   ] },

@@ -14,10 +14,11 @@ import duckdb
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
-from . import engine, fsa, funil as funil_mod, percurso as percurso_mod, ridab, series as series_mod, territorio as territorio_mod
+from . import engine, fsa, funil as funil_mod, obras as obras_mod, percurso as percurso_mod, ridab, series as series_mod, territorio as territorio_mod
 from .config import CONFIG
 from .db import connect, init_schema
 from .provenance import agora_utc, envelope, fixity
@@ -47,6 +48,9 @@ def aviso_cors(origens: tuple[str, ...], regex: str = "") -> Optional[str]:
     return ("CORS aberto a qualquer origem (SONDA_CORS_ORIGINS e SONDA_CORS_ORIGIN_REGEX vazias). "
             "Aceitável em desenvolvimento; em produção, declare as origens do front.")
 
+
+# respostas grandes (a lista de obras passa de 1 MB) vão comprimidas.
+app.add_middleware(GZipMiddleware, minimum_size=2048)
 
 # CORS por ambiente: SONDA_CORS_ORIGINS / SONDA_CORS_ORIGIN_REGEX (ver .env.example).
 app.add_middleware(CORSMiddleware, **opcoes_cors(CONFIG.cors_origens, CONFIG.cors_origem_regex))
@@ -380,6 +384,21 @@ def ligacoes_funil():
     _exige_fsa()
     res = funil_mod.calcular()
     return envelope(res, proveniencia=fsa.proveniencia_base(), avisos=res["ressalvas"])
+
+
+@app.get("/api/obras")
+def obras():
+    """Uma linha por obra (CPB): bilheteria, FSA (contratado, liberado, comercialização)
+    e valor captado por incentivo fiscal. Sem RIDAB, o captado sai nulo e a ressalva o diz."""
+    _exige_fsa()
+    try:
+        captado = obras_mod.captado_por_salic()
+        tabelas = ["renuncia_fiscal"]
+    except duckdb.IOException:
+        captado, tabelas = None, []
+    res = obras_mod.calcular(captado=captado)
+    prov = [fsa.proveniencia_base()] + ([ridab.proveniencia_base(tabelas)] if tabelas else [])
+    return envelope(res, proveniencia=prov, avisos=res["ressalvas"])
 
 
 @app.post("/api/ridab/registrar")
