@@ -124,6 +124,21 @@ não corrigida. `GET /api/ligacoes/funil` mostra o que liga e o que sobra do con
 à obra (CPB) e à bilheteria, com segmentos exclusivos (seguro · ambíguo · sem obra),
 órfãos por ano e por chamada, os maiores contratos sem obra e o elo ausente.
 
+## Bilheteria: fonte oficial e regra
+
+A bilheteria da `fsa.db` é reconstruída do arquivo oficial da ANCINE
+("Lançamentos comerciais por distribuidoras", Dados Abertos) por
+`atualizar_bilheteria.py`. O arquivo traz uma linha por distribuidora; a
+`fato_bilheteria` guarda uma linha por obra, a da distribuidora com **maior
+público** (sem somar: em codistribuição o mesmo público pode ser informado duas
+vezes), e `fato_bilheteria_distribuidora` guarda todas as linhas, com `principal`
+marcando a usada. A versão anterior da base escolhia às vezes a linha menor
+(ex.: *Ainda Estou Aqui* com 738 espectadores de uma sala, em vez de 5,86 mi).
+
+Para atualizar: `python3 atualizar_bilheteria.py`, depois
+`sha256sum data/fsa.db > data/fsa.db.sha256`, publicar a base numa nova release
+e trocar `FSA_URL_PADRAO` (em `sonda/config.py`) no mesmo commit do pin.
+
 ## Obras e o fundo
 
 `GET /api/obras` — uma linha por obra (CPB): público e renda (fsa.db), FSA
@@ -191,7 +206,8 @@ Neon. A API lê `SONDA_DATABASE_URL` e, na falta dela, `DATABASE_URL`/`POSTGRES_
 
 **2. Variáveis na Vercel** (Production e Preview): só `DATABASE_URL`, criada pela
 integração Neon (ou cole a pooled). A `fsa.db` vem por padrão da release pública
-deste repositório, conferida pelo pin; `SONDA_FSA_URL` só serve para trocar a fonte.
+deste repositório, conferida pelo pin; `SONDA_FSA_URL` só serve para trocar a fonte
+(deixe sem definir: a URL e o pin mudam juntos no código, a cada versão da base).
 `VITE_SONDA_API` não é necessária: sem ela, o front chama `/api` no próprio domínio.
 
 **3. Esquema e dados iniciais.** Crie o segredo `SONDA_DATABASE_URL` no GitHub

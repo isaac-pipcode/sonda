@@ -15,9 +15,21 @@ def test_inventario_lista_tabelas_e_visoes():
     # núcleos esperados da base
     assert "fato_contrato_serie" in nomes
     assert "vw_serie_fomento_mercado" in nomes
-    # a visão pareada tem 749 obras (documentado)
+    # a visão pareada tem 767 obras na base de 2026-11-12 (749 na anterior)
     vw = next(i for i in inv if i["nome"] == "vw_serie_fomento_mercado")
-    assert vw["registros"] == 749
+    assert vw["registros"] == 767
+
+
+def test_bilheteria_usa_a_distribuidora_principal():
+    """Regressão: a base anterior guardava a linha menor (738 espectadores de uma sala)."""
+    con = fsa._conn_sqlite()
+    try:
+        pub, dist, n = con.execute("SELECT publico, distribuidora, n_distribuidoras FROM fato_bilheteria "
+                                   "WHERE cpb = 'B2400324700000'").fetchone()
+        linhas = con.execute("SELECT COUNT(*) FROM fato_bilheteria_distribuidora WHERE cpb = 'B2400324700000'").fetchone()[0]
+    finally:
+        con.close()
+    assert pub == 5856874 and dist.startswith("COLUMBIA") and n == 2 and linhas == 2
 
 
 def test_dicionario_traz_ressalvas():

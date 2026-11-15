@@ -1045,7 +1045,7 @@ function citacao(nome, p) {
 }
 
 const LINK_BASE = {
-  fsa: { href: "https://github.com/isaac-pipcode/sonda/releases/download/fsa.db/fsa.db", rotulo: "Baixar a base (SQLite, 5 MB)" },
+  fsa: { href: "https://github.com/isaac-pipcode/sonda/releases/download/fsa.db-2026-11-12/fsa.db", rotulo: "Baixar a base (SQLite, 5 MB)" },
   ridab: { href: "https://huggingface.co/datasets/riabr-dados/riab", rotulo: "Abrir no Hugging Face" },
 };
 

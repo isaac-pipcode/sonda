@@ -22,7 +22,7 @@ O ecossistema de dados da ANCINE tem **três chaves primárias distintas**, e en
 
 | Rota | Chave | Confiança | O que responde |
 |---|---|---|---|
-| 22 → 11 → 28 | contrato→CPB→CPB | 0,95–1,00 | fomento × bilheteria (4.473 contratos, 749 obras) |
+| 22 → 11 → 28 | contrato→CPB→CPB | 0,95–1,00 | fomento × bilheteria (4.473 contratos, 749 obras; 767 na base de 2026-11-12) |
 | Relatórios → 11 → 28 | nº contrato | **1,00** | idem, determinístico, mas só 2021-22 |
 | 22 ⟷ Relatórios | CNPJ+data+valor | — | **validação cruzada** (concordância 99,5%) |
 

@@ -16,7 +16,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SONDA_DATABASE_URL: ${{ secrets.SONDA_DATABASE_URL }}
-      SONDA_FSA_URL: ${{ vars.SONDA_FSA_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
