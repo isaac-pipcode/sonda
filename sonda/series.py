@@ -23,7 +23,8 @@ MOEDAS = ("real", "nominal")
 ANO_PISO, ANO_TETO, JANELA_MAX = 1990, 2100, 60
 
 # tabelas do RIDAB lidas por este módulo (para a proveniência da resposta).
-TABELAS_RIDAB = ("deflator_ipca", "renuncia_fiscal", "salas_exibicao_evolucao", "preco_ingresso")
+TABELAS_RIDAB = ("deflator_ipca", "renuncia_fiscal", "salas_exibicao_evolucao", "preco_ingresso",
+                 "bilheteria_por_filme_ano")
 
 _cache_ridab: dict[str, dict] = {}
 
@@ -81,6 +82,11 @@ def _agregados_ridab(base: Optional[str]) -> dict:
             "SELECT CAST(ano AS INTEGER), COUNT(*) FROM read_parquet(?) "
             "WHERE status = 'ABERTA' GROUP BY 1", "salas_exibicao_evolucao")}
 
+        # público em salas no ano de EXIBIÇÃO: total e o das obras brasileiras (CPB iniciado por B).
+        mercado = {int(a): (float(tot or 0), float(br or 0)) for a, tot, br in consulta(
+            "SELECT CAST(ano AS INTEGER), SUM(publico), SUM(CASE WHEN cpb_roe LIKE 'B%' THEN publico END) "
+            "FROM read_parquet(?) WHERE ano IS NOT NULL GROUP BY 1", "bilheteria_por_filme_ano")}
+
         ingresso = {int(a): (float(nom), float(real)) for a, nom, real in consulta(
             "SELECT ano, pmi_nominal, pmi_real_2024 FROM read_parquet(?) "
             "WHERE pmi_nominal IS NOT NULL ORDER BY ano", "preco_ingresso")}
@@ -95,7 +101,7 @@ def _agregados_ridab(base: Optional[str]) -> dict:
         del ingresso[omitidos[-1]]
 
     res = {"fator": fator, "renuncia": renuncia, "renuncia_sem_ano": sem_ano,
-           "salas": salas, "ingresso": ingresso, "ingresso_omitidos": sorted(omitidos)}
+           "salas": salas, "ingresso": ingresso, "ingresso_omitidos": sorted(omitidos), "mercado": mercado}
     if base is None:
         _cache_ridab[chave] = res
     return res
@@ -177,6 +183,11 @@ def calcular(de: int, ate: int, moeda: str = "real",
     if ud and len(ud) >= 7 and int(ud[5:7]) < 12:
         parcial_pub = frozenset({int(ud[:4])})
 
+    mercado = r["mercado"]
+    participacao = {a: (br / tot * 100 if tot else None, None) for a, (tot, br) in mercado.items()}
+    # o último ano da revisão ainda está em curso: parcial.
+    parcial_mercado = frozenset({max(mercado)}) if mercado else frozenset()
+
     n_sem, v_sem = r["renuncia_sem_ano"]
     omitidos = r["ingresso_omitidos"]
     ressalvas_ing = ["Preço médio informado pela ANCINE; o valor real usa o fator IPCA base 2024 do RIDAB."]
@@ -185,6 +196,13 @@ def calcular(de: int, ate: int, moeda: str = "real",
                              + "; esses anos foram omitidos (valor repetido não é dado).")
 
     series = [
+        _serie("participacao_brasileira", "ridab", "Participação do filme brasileiro", "% do público em salas",
+               anos, participacao, 1, [
+            "Público das obras brasileiras (CPB) dividido pelo público total de cada ano, pelo ano de exibição "
+            "e não de lançamento; relatórios de bilheteria da ANCINE, via RIDAB.",
+            "Cobertura a partir de 2014; o último ano da revisão está em curso.",
+        ], parcial=parcial_mercado, extras={"publico_total_mi": {a: round(t / 1e6, 2) for a, (t, _) in mercado.items()},
+                                            "publico_brasileiro_mi": {a: round(b / 1e6, 2) for a, (_, b) in mercado.items()}}),
         _serie("fomento_fsa", "fsa", "Fomento contratado", un_moeda, anos, fomento, 1, [
             "Valor do contrato por ano de publicação no DOU, com as parcelas somadas por obra, CNPJ e data.",
             nota_ipca,

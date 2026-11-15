@@ -110,13 +110,14 @@ function useEnvelope(fn, deps = []) {
 const FONTE_UI = "'Archivo',sans-serif";
 const FONTE_NUM = "'IBM Plex Mono',monospace";
 const DOMINIO = {
+  participacao_brasileira: "Mercado",
   fomento_fsa: "Fomento direto",
   renuncia_fiscal: "Fomento indireto",
   publico_obras_brasileiras: "Demanda",
   salas_abertas: "Oferta de salas",
   preco_ingresso: "Preço",
 };
-const CASAS = { fomento_fsa: 1, renuncia_fiscal: 1, publico_obras_brasileiras: 2, salas_abertas: 0, preco_ingresso: 2 };
+const CASAS = { participacao_brasileira: 1, fomento_fsa: 1, renuncia_fiscal: 1, publico_obras_brasileiras: 2, salas_abertas: 0, preco_ingresso: 2 };
 const ROTULO_BASE = { fsa: "■ fsa.db", ridab: "▲ RIDAB" };
 const HACHURA_VAZIO = `repeating-linear-gradient(135deg, ${S.hachura} 0 1px, transparent 1px 6px)`;
 
@@ -192,7 +193,7 @@ function CopiarCitacao({ texto }) {
 const hoje = () => new Date().toLocaleDateString("pt-BR");
 
 // ============ INDICADORES · séries anuais (FSA e RIDAB), um gráfico por série ============
-const COR_BASE = { fsa: S.tinta, ridab: S.sonar };
+const COR_BASE = { fsa: "#2a78d6", ridab: "#1baf7a" }; // validadas: ver SERIE
 const NOME_BASE_CURTO = { fsa: "FSA", ridab: "RIDAB" };
 const compacto = (v) => (v === 0 ? "0" : v >= 1000 ? `${fmtNum(v / 1000, v >= 10000 ? 0 : 1)} mil` : fmtNum(v, v < 10 ? 1 : 0));
 
@@ -255,6 +256,143 @@ function CartaoSerie({ s, anos, ano, aoAno }) {
   );
 }
 
+// ——— gráficos de abertura: participação de mercado e trajetórias indexadas ———
+// Cores de série validadas (validate_palette.js): FSA azul, RIDAB verde-água; o vermelho da marca só destaca.
+const SERIE = { fsa: "#2a78d6", ridab: "#1baf7a" };
+const CINZA_CONTEXTO = "#C3C2BC";
+const NOME_SERIE = {
+  participacao_brasileira: "Participação brasileira", fomento_fsa: "Fomento FSA", renuncia_fiscal: "Renúncia fiscal",
+  publico_obras_brasileiras: "Público brasileiro", salas_abertas: "Salas", preco_ingresso: "Preço do ingresso",
+};
+
+function Participacao({ s }) {
+  const pontos = s.dados.filter((d) => d.valor != null);
+  const fechados = pontos.filter((d) => !d.parcial);
+  const [sob, setSob] = useState(null);
+  if (pontos.length < 2) return null;
+  const tot = s.extras?.publico_total_mi || {}, br = s.extras?.publico_brasileiro_mi || {};
+  const W = 720, H = 280, E = 44, D = 70, T = 18, B = 28;
+  const a0 = pontos[0].ano, a1 = pontos[pontos.length - 1].ano;
+  const topo = Math.ceil(Math.max(...pontos.map((d) => d.valor)) / 5) * 5;
+  const x = (a) => E + ((a - a0) / (a1 - a0)) * (W - E - D), y = (v) => T + (H - T - B) * (1 - v / topo);
+  const min = fechados.reduce((m, d) => (d.valor < m.valor ? d : m), fechados[0]);
+  const ult = fechados[fechados.length - 1];
+  const lido = pontos.find((d) => d.ano === sob) || ult;
+  const linha = (lista) => lista.map((d) => `${x(d.ano)},${y(d.valor)}`).join(" ");
+  const marca = (d, txt, anc, dy = 4) => (
+    <g key={`m${d.ano}`}>
+      <circle cx={x(d.ano)} cy={y(d.valor)} r={5} fill={S.sinal} stroke={S.papel} strokeWidth={2} />
+      <text x={x(d.ano) + (anc === "end" ? -9 : 9)} y={y(d.valor) + dy} textAnchor={anc || "start"} fontFamily={FONTE_UI} fontSize="13" fontWeight="700" fill={S.tinta}>{txt}</text>
+    </g>
+  );
+  return (
+    <section aria-labelledby="g-part" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <h2 id="g-part" style={{ margin: 0, fontSize: 21, fontWeight: 700, lineHeight: 1.25 }}>
+        O filme brasileiro teve <span style={{ color: S.sinalTxt }}>{fmtNum(min.valor, 1)}%</span> do público em {min.ano} e {fmtNum(ult.valor, 1)}% em {ult.ano}
+      </h2>
+      <p aria-live="polite" style={{ margin: 0, fontSize: 14.5, color: S.mudo }}>
+        {lido.ano}{lido.parcial ? " (ano em curso)" : ""}: <strong style={{ color: S.tinta }}>{fmtNum(lido.valor, 1)}%</strong> · {fmtNum(br[lido.ano], 2)} mi de {fmtNum(tot[lido.ano], 1)} mi de espectadores
+      </p>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Participação do filme brasileiro no público de cinema, ${a0} a ${a1}. Mínimo de ${fmtNum(min.valor, 1)}% em ${min.ano}.`}
+        style={{ width: "100%", height: "auto", display: "block" }} onMouseLeave={() => setSob(null)}>
+        {Array.from({ length: topo / 5 + 1 }, (_, i) => i * 5).map((v) => (
+          <g key={v}>
+            <line x1={E} x2={W - D} y1={y(v)} y2={y(v)} stroke={v ? S.linha : S.tinta} strokeWidth={v ? 1 : 1.5} />
+            <text x={E - 8} y={y(v) + 4} textAnchor="end" fontFamily={FONTE_NUM} fontSize="12" fill={S.mudo}>{v}%</text>
+          </g>
+        ))}
+        {pontos.filter((d) => d.ano % 2 === 0 || d.ano === a1).map((d) => (
+          <text key={d.ano} x={x(d.ano)} y={H - 8} textAnchor="middle" fontFamily={FONTE_NUM} fontSize="12" fill={d.ano === lido.ano ? S.sinalTxt : S.mudo}>{d.ano}</text>
+        ))}
+        <line x1={x(lido.ano)} x2={x(lido.ano)} y1={T} y2={H - B} stroke={S.linha} strokeWidth="1" />
+        <polyline fill="none" stroke={SERIE.ridab} strokeWidth="2.5" strokeLinejoin="round" points={linha(fechados)} />
+        {pontos.some((d) => d.parcial) && <polyline fill="none" stroke={SERIE.ridab} strokeWidth="2.5" strokeDasharray="5 4" points={linha(pontos.slice(fechados.length - 1))} />}
+        {marca(min, `${fmtNum(min.valor, 1)}%`, "start")}
+        {marca(ult, `${fmtNum(ult.valor, 1)}%`, "end", -10)}
+        {pontos.map((d) => (
+          <rect key={`h${d.ano}`} x={x(d.ano) - (W - E - D) / (a1 - a0) / 2} y={T} width={(W - E - D) / (a1 - a0)} height={H - T - B} fill="transparent"
+            onMouseEnter={() => setSob(d.ano)} onClick={() => setSob(d.ano)} style={{ cursor: "crosshair" }} />
+        ))}
+      </svg>
+      <Notas itens={s.ressalvas} />
+    </section>
+  );
+}
+
+function Indice({ series }) {
+  const BASE = 2019;
+  const lista = series.filter((s) => s.id !== "participacao_brasileira").map((s) => {
+    const b = s.dados.find((d) => d.ano === BASE)?.valor;
+    return { ...s, idx: b ? s.dados.filter((d) => d.valor != null && !d.parcial && d.ano >= 2014).map((d) => ({ ano: d.ano, v: (d.valor / b) * 100, bruto: d.valor })) : [] };
+  }).filter((s) => s.idx.length > 1);
+  const [sel, setSel] = useState("publico_obras_brasileiras");
+  const [sob, setSob] = useState(null);
+  if (!lista.length) return null;
+  const W = 720, H = 300, E = 44, D = 150, T = 14, B = 28;
+  const a0 = 2014, a1 = Math.max(...lista.flatMap((s) => s.idx.map((p) => p.ano)));
+  const topo = Math.ceil(Math.max(...lista.flatMap((s) => s.idx.map((p) => p.v))) / 50) * 50;
+  const x = (a) => E + ((a - a0) / (a1 - a0)) * (W - E - D), y = (v) => T + (H - T - B) * (1 - v / topo);
+  const atual = lista.find((s) => s.id === sel) || lista[0];
+  const ordem = [...lista.filter((s) => s.id !== atual.id), atual];
+  const trechos = (idx) => idx.reduce((acc, p, i) => {
+    if (!i || p.ano - idx[i - 1].ano > 1) acc.push([]);
+    acc[acc.length - 1].push(p);
+    return acc;
+  }, []);
+  const fim = atual.idx[atual.idx.length - 1];
+  return (
+    <section aria-labelledby="g-idx" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <h2 id="g-idx" style={{ margin: 0, fontSize: 21, fontWeight: 700, lineHeight: 1.25 }}>Trajetórias desde 2019 (2019 = 100)</h2>
+      <div role="group" aria-label="Série em destaque" style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+        {lista.map((s) => (
+          <button key={s.id} type="button" aria-pressed={s.id === atual.id} onClick={() => setSel(s.id)}
+            style={{ minHeight: 40, padding: "0 14px", borderRadius: 20, border: `1px solid ${s.id === atual.id ? S.tinta : S.linha}`, background: s.id === atual.id ? S.tinta : S.papel, color: s.id === atual.id ? S.papel : S.tinta, fontFamily: FONTE_UI, fontSize: 14.5, cursor: "pointer" }}>
+            {NOME_SERIE[s.id] || s.titulo}
+          </button>
+        ))}
+      </div>
+      <p aria-live="polite" style={{ margin: 0, fontSize: 14.5, color: S.mudo, minHeight: 22 }}>
+        {sob == null
+          ? `${NOME_SERIE[atual.id]}: ${fmtNum(fim.v, 0)} em ${fim.ano} (${fmtNum(fim.bruto, CASAS[atual.id] ?? 1)} ${atual.unidade}).`
+          : `${sob}: ` + lista.map((s) => { const p = s.idx.find((q) => q.ano === sob); return `${NOME_SERIE[s.id]} ${p ? fmtNum(p.v, 0) : "—"}`; }).join(" · ")}
+      </p>
+      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Séries indexadas a 2019 igual a 100; em destaque: ${NOME_SERIE[atual.id]}, ${fmtNum(fim.v, 0)} em ${fim.ano}.`}
+        style={{ width: "100%", height: "auto", display: "block" }} onMouseLeave={() => setSob(null)}>
+        {Array.from({ length: topo / 50 + 1 }, (_, i) => i * 50).map((v) => (
+          <g key={v}>
+            <line x1={E} x2={W - D} y1={y(v)} y2={y(v)} stroke={v === 100 ? S.hachura : S.linha} strokeWidth={v === 100 ? 1.5 : 1} />
+            <text x={E - 8} y={y(v) + 4} textAnchor="end" fontFamily={FONTE_NUM} fontSize="12" fill={S.mudo}>{v}</text>
+          </g>
+        ))}
+        {Array.from({ length: Math.floor((a1 - a0) / 2) + 1 }, (_, i) => a0 + i * 2).map((a) => (
+          <text key={a} x={x(a)} y={H - 8} textAnchor="middle" fontFamily={FONTE_NUM} fontSize="12" fill={S.mudo}>{a}</text>
+        ))}
+        {sob != null && <line x1={x(sob)} x2={x(sob)} y1={T} y2={H - B} stroke={S.linha} />}
+        {ordem.map((s) => {
+          const on = s.id === atual.id;
+          return trechos(s.idx).map((tr, i) => (
+            <polyline key={`${s.id}${i}`} fill="none" stroke={on ? SERIE[s.base] : CINZA_CONTEXTO} strokeWidth={on ? 2.5 : 1.5} strokeLinejoin="round"
+              points={tr.map((p) => `${x(p.ano)},${y(p.v)}`).join(" ")} />
+          ));
+        })}
+        <circle cx={x(fim.ano)} cy={y(fim.v)} r={4.5} fill={SERIE[atual.base]} stroke={S.papel} strokeWidth={2} />
+        <text x={x(fim.ano) + 9} y={y(fim.v) + 4} fontFamily={FONTE_UI} fontSize="13" fontWeight="700" fill={S.tinta}>{NOME_SERIE[atual.id]} {fmtNum(fim.v, 0)}</text>
+        <text x={W - D + 6} y={y(100) + 4} fontFamily={FONTE_NUM} fontSize="12" fill={S.mudo}>2019 = 100</text>
+        {Array.from({ length: a1 - a0 + 1 }, (_, i) => a0 + i).map((a) => (
+          <rect key={`h${a}`} x={x(a) - (W - E - D) / (a1 - a0) / 2} y={T} width={(W - E - D) / (a1 - a0)} height={H - T - B} fill="transparent"
+            onMouseEnter={() => setSob(a)} onClick={() => setSob(a)} style={{ cursor: "crosshair" }} />
+        ))}
+      </svg>
+      <Notas rotulo="Como ler" itens={[
+        "Cada série dividida pelo seu valor de 2019 e multiplicada por 100: compara direções, não magnitudes.",
+        "Os valores absolutos, cada um na sua unidade, estão nos cartões abaixo e no CSV.",
+        "Público brasileiro é por ano de lançamento; a participação ao lado é por ano de exibição.",
+        "Anos em curso ficam fora do índice.",
+      ]} />
+    </section>
+  );
+}
+
 function Investimento() {
   const [moeda, setMoeda] = useState("real");
   const [fixo, setFixo] = useState(null);      // ano escolhido na lista
@@ -270,7 +408,7 @@ function Investimento() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24, fontFamily: FONTE_UI }}>
-      <TituloTela titulo="Quanto se investe e quanto se vê" sub="Cinco séries anuais do audiovisual brasileiro. Passe o cursor sobre um ano para comparar as séries.">
+      <TituloTela titulo="Quanto se investe e quanto se vê" sub="Seis séries anuais do audiovisual brasileiro, do FSA e do RIDAB. Passe o cursor sobre um ano para ler os valores.">
         <SeletorMoeda moeda={moeda} aoMudar={setMoeda} />
       </TituloTela>
 
@@ -291,6 +429,11 @@ function Investimento() {
             <CopiarCitacao texto={citacao} />
           </div>
         </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(520px, 100%), 1fr))", gap: "28px 40px", alignItems: "start" }}>
+          {series.find((s) => s.id === "participacao_brasileira") && <Participacao s={series.find((s) => s.id === "participacao_brasileira")} />}
+          <Indice series={series} />
+        </div>
+        <h2 style={{ margin: "8px 0 0", fontSize: 21, fontWeight: 700, borderTop: `1px solid ${S.linha}`, paddingTop: 20 }}>Cada série na sua unidade</h2>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(460px, 100%), 1fr))", gap: 20 }}>
           {series.map((s) => <CartaoSerie key={s.id} s={s} anos={anos} ano={ano} aoAno={setSobre} />)}
         </div>
@@ -667,9 +810,10 @@ const GRADE = {
   RS: [4, 8], SC: [5, 8],
 };
 // rampas monotônicas em luminosidade: a ordem se lê sem depender do matiz.
-const RAMPA_FOMENTO = ["#ECEEF0", "#C3C8CE", "#8C939C", "#4A5058", "#0B0D10"];
-const RAMPA_SALAS = ["#E4F3F0", "#A6DCD3", "#4DB8A8", "#00796B", "#00443C"];
-const TEXTO_RAMPA = [S.tinta, S.tinta, S.tinta, "#FFFFFF", "#FFFFFF"];
+// rampas de um tom, validadas (claro: primeiro passo ≥ 2:1 sobre o fundo)
+const RAMPA_FOMENTO = ["#86b6ef", "#5598e7", "#2a78d6", "#1c5cab", "#104281"];
+const RAMPA_SALAS = ["#5cbd99", "#1f9e70", "#14805a", "#0c6244", "#06452f"];
+const TEXTO_RAMPA = [S.tinta, S.tinta, "#FFFFFF", "#FFFFFF", "#FFFFFF"];
 const binFomento = (v) => (v < 10 ? 0 : v < 30 ? 1 : v < 100 ? 2 : v < 300 ? 3 : 4);
 const binSalas = (v) => (v < 1 ? 0 : v < 1.5 ? 1 : v < 2 ? 2 : v < 2.5 ? 3 : 4);
 const HACHURA_VERIFICAR = `repeating-linear-gradient(135deg, ${S.hachura} 0 1px, ${S.papel} 1px 5px)`;
