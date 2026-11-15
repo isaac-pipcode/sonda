@@ -32,6 +32,9 @@ def fontes(tmp_path):
     # 2021 repete 2020: carry-forward do RIDAB, que não é dado.
     d.execute(f"""COPY (SELECT * FROM (VALUES (2019, 15.0, 21.0), (2020, 16.0, 20.0), (2021, 16.0, 20.0))
         t(ano, pmi_nominal, pmi_real_2024)) TO '{tmp_path}/preco_ingresso.parquet' (FORMAT PARQUET)""")
+    d.execute(f"""COPY (SELECT * FROM (VALUES ('B1', 2019, 30), ('E1', 2019, 70), ('B2', 2020, 5), ('E2', 2020, 95),
+        ('B3', 2021, 10), ('E3', 2021, 10)) t(cpb_roe, ano, publico))
+        TO '{tmp_path}/bilheteria_por_filme_ano.parquet' (FORMAT PARQUET)""")
     d.close()
     return sq, str(tmp_path)
 
@@ -154,3 +157,13 @@ def test_rota_recusa_parametro_invalido_com_422(cliente, monkeypatch):
 
     monkeypatch.setattr(api.series_mod, "calcular", recusa)
     assert cliente.get("/api/series?de=2020&ate=2010").status_code == 422
+
+
+def test_participacao_do_filme_brasileiro_e_por_ano_de_exibicao(fontes):
+    sq, base = fontes
+    s = _por_id(series.calcular(2018, 2021, "real", fsa_con=sq, base=base))["participacao_brasileira"]
+    assert _valor(s, 2019)["valor"] == pytest.approx(30.0)          # 30 / (30 + 70)
+    assert _valor(s, 2020)["valor"] == pytest.approx(5.0)
+    assert _valor(s, 2018)["valor"] is None                         # sem dado: nulo
+    assert _valor(s, 2021)["parcial"] is True                       # último ano da revisão
+    assert s["extras"]["publico_total_mi"][2019] == pytest.approx(0.0)  # 100 espectadores = 0,0001 mi

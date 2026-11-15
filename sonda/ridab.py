@@ -41,6 +41,9 @@ TABELAS = frozenset({
     "salas_exibicao_complexos",
     "salas_exibicao_evolucao",
     "preco_ingresso",
+    "bilheteria_por_filme_ano",
+    "bilheteria_diaria_municipio_filme_ano",
+    "bilheteria_diaria_exibidora_filme_ano",
 })
 
 _HF_REPO = "riabr-dados/riab"

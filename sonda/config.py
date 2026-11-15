@@ -10,7 +10,8 @@ from dataclasses import dataclass
 
 
 # Release pública deste repositório; o conteúdo é conferido pelo pin data/fsa.db.sha256.
-FSA_URL_PADRAO = "https://github.com/isaac-pipcode/sonda/releases/download/fsa.db/fsa.db"
+# URL e pin mudam JUNTOS, no mesmo commit: cada versão da base tem a sua release.
+FSA_URL_PADRAO = "https://github.com/isaac-pipcode/sonda/releases/download/fsa.db-2026-11-12/fsa.db"
 
 
 @dataclass(frozen=True)

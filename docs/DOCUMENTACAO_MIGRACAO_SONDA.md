@@ -119,7 +119,7 @@ DIMENSÕES
 
 | Visão | Responde |
 |---|---|
-| `vw_serie_fomento_mercado` | fomento × bilheteria por obra (749 obras pareadas) |
+| `vw_serie_fomento_mercado` | fomento × bilheteria por obra (749 obras pareadas; 767 na base de 2026-11-12) |
 | `vw_fomento_controlado` | idem, SEPARANDO "só FSA" de "FSA + incentivo" |
 | `vw_serie_funil` | do contrato à sala: sem_CPB / CPB_sem_sala / em_cartaz |
 | `vw_producao_x_exibicao` | por UF: % do fomento × % das salas × densidade |

@@ -5,7 +5,7 @@ A `fsa.db` não é versionada (regra do projeto: nunca commitar bases de dados
 brutas). O que vai no git é só o PIN de integridade `data/fsa.db.sha256`: o
 arquivo baixado só é aceito se bater com ele (fixity, decisão 7).
 
-  $ export SONDA_FSA_URL=https://…/fsa.db      # onde a base está hospedada
+  $ export SONDA_FSA_URL=https://…/fsa.db      # opcional: padrão é a release do código
   $ export SONDA_FSA_TOKEN=…                   # opcional (hospedagem privada)
   $ python3 baixar_fsa.py
 
@@ -42,10 +42,9 @@ def baixar(
 
 
 def main() -> int:
-    url = os.environ.get("SONDA_FSA_URL")
-    if not url:
-        print("[baixar_fsa] defina SONDA_FSA_URL (onde a base está hospedada).", file=sys.stderr)
-        return 2
+    # padrão: a release desta versão do código (mesmo commit do pin); SONDA_FSA_URL só troca a fonte.
+    from sonda.config import FSA_URL_PADRAO
+    url = os.environ.get("SONDA_FSA_URL") or FSA_URL_PADRAO
     caminho = baixar(url, token=os.environ.get("SONDA_FSA_TOKEN"))
     print(f"[baixar_fsa] ok: {caminho} (sha256 conferido com o pin)")
     return 0
