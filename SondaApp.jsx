@@ -307,6 +307,11 @@ const MEDIDAS = [
   { id: "fsa_liberado", rotulo: "FSA liberado (R$)", curto: "FSA liberado R$", casas: 0 },
   { id: "fsa_comercializacao", rotulo: "FSA em comercialização (R$)", curto: "FSA comercialização R$", casas: 0 },
   { id: "captado", rotulo: "Captado por incentivo fiscal (R$)", curto: "Captado R$", casas: 0 },
+  { id: "publico_diario", rotulo: "Público pelos relatórios diários (RIDAB)", curto: "Público diário", casas: 0 },
+  { id: "municipios", rotulo: "Municípios onde passou", curto: "Municípios", casas: 0 },
+  { id: "ufs", rotulo: "UFs onde passou", curto: "UFs", casas: 0 },
+  { id: "complexos_pico", rotulo: "Complexos de cinema (ano de pico)", curto: "Complexos", casas: 0 },
+  { id: "publico_fora_capitais_pct", rotulo: "Público fora das capitais (%)", curto: "Fora capitais %", casas: 1 },
 ];
 const MEDIDA = Object.fromEntries(MEDIDAS.map((m) => [m.id, m]));
 const POR_PAGINA = 50;
@@ -356,7 +361,7 @@ function Dispersao({ linhas, x, y, log, sel, aoSel }) {
   const px = (v) => E + ((tr(v) - x0) / (x1 - x0)) * (W - E - D);
   const py = (v) => H - B - ((tr(v) - y0) / (y1 - y0)) * (H - B - T);
   const ticks = (a, b) => (log ? Array.from({ length: b - a + 1 }, (_, i) => a + i) : [0, 0.25, 0.5, 0.75, 1].map((f) => a + (b - a) * f));
-  const rot = (v) => curtoNum(log ? 10 ** v : v);
+  const rot = (v) => (log ? curtoNum(10 ** v) : fmtNum(v, Math.abs(v) < 10 && v % 1 ? 1 : 0));
   const rho = spearman(pts.map((o) => o[x]), pts.map((o) => o[y]));
   return (
     <figure style={{ margin: 0, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -406,6 +411,7 @@ function PorFilme() {
   const [ordem, setOrdem] = useState(["publico", -1]);
   const [pagina, setPagina] = useState(0);
   const [sel, setSel] = useState(null);
+  const [soVerificar, setSoVerificar] = useState(false);
 
   const ufs = [...new Set(todas.map((o) => o.uf).filter(Boolean))].sort();
   const tipos = [...new Set(todas.map((o) => o.tipo).filter(Boolean))].sort();
@@ -414,7 +420,8 @@ function PorFilme() {
   const linhas = todas.filter((o) =>
     (!termo || [o.titulo, o.distribuidora, o.produtora].some((s) => s && s.toLowerCase().includes(termo)))
     && (!uf || o.uf === uf) && (!tipo || o.tipo === tipo)
-    && (!de || (ano(o) ?? 0) >= +de) && (!ate || (ano(o) ?? 9999) <= +ate));
+    && (!de || (ano(o) ?? 0) >= +de) && (!ate || (ano(o) ?? 9999) <= +ate) && (!soVerificar || o.publico_verificar));
+  const nVerificar = env?.dados?.totais?.publico_a_verificar || 0;
   const [col, dir] = ordem;
   const ordenadas = [...linhas].sort((a, b) => {
     const va = a[col], vb = b[col];
@@ -433,20 +440,28 @@ function PorFilme() {
   const colunas = [["titulo", "Obra"], ["ano_lancamento", "Lançamento"], ["uf", "UF"], ...MEDIDAS.map((m) => [m.id, m.curto])];
   const csv = () => baixarCSV("sonda_obras.csv",
     ["cpb", "titulo", "tipo", "ano_lancamento", "uf_proponente_fsa", "proponente_fsa", "distribuidora", "publico", "renda_R$", "contratos_fsa",
-      "fsa_contratado_R$", "fsa_liberado_R$", "fsa_comercializacao_R$", "projetos_incentivo", "captado_R$", "captado_compartilhado"],
+      "fsa_contratado_R$", "fsa_liberado_R$", "fsa_comercializacao_R$", "projetos_incentivo", "captado_R$", "captado_compartilhado",
+      "publico_relatorios_diarios", "publico_a_verificar", "municipios", "ufs", "complexos_ano_pico", "anos_em_cartaz", "publico_fora_capitais_%"],
     ordenadas.map((o) => [o.cpb, o.titulo, o.tipo, o.ano_lancamento, o.uf, o.produtora, o.distribuidora, o.publico, o.renda, o.contratos_fsa,
-      o.fsa_contratado, o.fsa_liberado, o.fsa_comercializacao, o.projetos_incentivo, o.captado, o.captado_compartilhado ? "sim" : ""]));
+      o.fsa_contratado, o.fsa_liberado, o.fsa_comercializacao, o.projetos_incentivo, o.captado, o.captado_compartilhado ? "sim" : "",
+      o.publico_diario, o.publico_verificar ? "sim" : "", o.municipios, o.ufs, o.complexos_pico, o.anos_em_cartaz, o.publico_fora_capitais_pct]));
   const prov = Array.isArray(env?.proveniencia) ? env.proveniencia : [];
   const citacao = `SONDA — Observatório de Dados e Políticas do Audiovisual (UFF). Obras do audiovisual brasileiro: bilheteria, FSA e incentivo fiscal. Fontes: ${prov.map((p) => `${p.fonte} (versão ${String(p.instancia_versao).slice(0, 12)})`).join("; ")}. Consultado em ${hoje()}.`;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24, fontFamily: FONTE_UI }}>
-      <TituloTela titulo="Filme a filme" sub="Bilheteria, FSA e incentivo fiscal de cada obra. Filtre, compare duas medidas no gráfico e baixe a tabela.">
+      <TituloTela titulo="Filme a filme" sub="Bilheteria, circulação em salas, FSA e incentivo fiscal de cada obra. Filtre, compare duas medidas no gráfico e baixe a tabela.">
         {env && <button type="button" onClick={csv} style={BTN_LEVE}>Baixar CSV ({fmtNum(ordenadas.length, 0)} obras)</button>}
         {env && <CopiarCitacao texto={citacao} />}
       </TituloTela>
 
       <Estado carregando={carregando && !env} erro={erro} vazio={todas.length === 0} vazioMsg="Nenhuma obra disponível no momento.">
+        {nVerificar > 0 && (
+          <p role="note" style={{ margin: 0, padding: "10px 14px", borderLeft: `4px solid ${S.sinal}`, background: S.painel, fontSize: 14.5, lineHeight: 1.45, display: "flex", flexWrap: "wrap", gap: "4px 16px", alignItems: "center" }}>
+            <span><strong>{fmtNum(nVerificar, 0)} obras com público a verificar</strong> (⚠): os relatórios diários somam mais que o dobro do público registrado. São sobretudo lançamentos recentes.</span>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 44 }}><input type="checkbox" checked={soVerificar} onChange={(e) => { setSoVerificar(e.target.checked); setPagina(0); }} style={{ width: 20, height: 20 }} />Mostrar só essas</label>
+          </p>
+        )}
         <section aria-label="Filtros" style={{ display: "flex", flexWrap: "wrap", gap: "12px 16px", alignItems: "flex-end" }}>
           <label style={{ ...rotulo, flex: "1 1 260px" }}>Buscar título, produtora ou distribuidora
             <input type="search" value={busca} onChange={(e) => filtro(setBusca)(e.target.value)} style={campo} />
@@ -491,10 +506,11 @@ function PorFilme() {
                   {MEDIDAS.map((m) => (
                     <React.Fragment key={m.id}>
                       <dt>{m.rotulo}</dt>
-                      <dd style={{ margin: 0, fontFamily: FONTE_NUM, textAlign: "right" }}>{obraSel[m.id] == null ? "—" : fmtNum(obraSel[m.id], 0)}</dd>
+                      <dd style={{ margin: 0, fontFamily: FONTE_NUM, textAlign: "right" }}>{obraSel[m.id] == null ? "—" : fmtNum(obraSel[m.id], m.casas)}</dd>
                     </React.Fragment>
                   ))}
                 </dl>
+                {obraSel.publico_verificar && <p style={{ margin: 0, fontSize: 13.5, color: S.sinalTxt }}>Público a verificar: os relatórios diários somam {fmtNum(obraSel.publico_diario, 0)} espectadores, contra {fmtNum(obraSel.publico, 0)} registrados na fsa.db.</p>}
                 {obraSel.captado_compartilhado && <p style={{ margin: 0, fontSize: 13.5, color: S.sinalTxt }}>O valor captado é de um projeto que cobre mais de uma obra.</p>}
                 <span style={{ fontFamily: FONTE_NUM, fontSize: 12.5, color: S.mudo }}>CPB {obraSel.cpb}</span>
               </>
@@ -504,7 +520,7 @@ function PorFilme() {
 
         <section aria-label="Tabela de obras" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <div style={{ overflowX: "auto" }}>
-            <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1100, fontSize: 14 }}>
+            <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1640, fontSize: 14 }}>
               <caption style={{ position: "absolute", left: -9999 }}>Obras, com as medidas de cada base</caption>
               <thead>
                 <tr style={{ borderBottom: `2px solid ${S.tinta}` }}>
@@ -521,10 +537,10 @@ function PorFilme() {
               <tbody>
                 {visiveis.map((o) => (
                   <tr key={o.cpb} onClick={() => setSel(o.cpb)} style={{ borderBottom: `1px solid ${S.linha}`, background: o.cpb === sel ? S.painel : "transparent", cursor: "pointer" }}>
-                    <th scope="row" style={{ textAlign: "left", fontWeight: 600, padding: "8px" }}>{o.titulo}</th>
+                    <th scope="row" style={{ textAlign: "left", fontWeight: 600, padding: "8px" }}>{o.titulo}{o.publico_verificar && <span title="Público a verificar" aria-label="público a verificar" style={{ color: S.sinalTxt, marginLeft: 6 }}>⚠</span>}</th>
                     <td style={{ padding: "8px", textAlign: "right", fontFamily: FONTE_NUM }}>{o.ano_lancamento ?? "—"}</td>
                     <td style={{ padding: "8px", fontFamily: FONTE_NUM }}>{o.uf ?? "—"}</td>
-                    {MEDIDAS.map((m) => <td key={m.id} style={{ padding: "8px", textAlign: "right", fontFamily: FONTE_NUM, color: o[m.id] == null ? S.hachura : S.tinta }}>{o[m.id] == null ? "—" : fmtNum(o[m.id], 0)}</td>)}
+                    {MEDIDAS.map((m) => <td key={m.id} style={{ padding: "8px", textAlign: "right", fontFamily: FONTE_NUM, color: o[m.id] == null ? S.hachura : S.tinta }}>{o[m.id] == null ? "—" : fmtNum(o[m.id], m.casas)}</td>)}
                   </tr>
                 ))}
               </tbody>
@@ -537,6 +553,102 @@ function PorFilme() {
           </div>
         </section>
         <Notas itens={env?.dados?.ressalvas} />
+      </Estado>
+    </div>
+  );
+}
+
+// ============ INDICADORES · o fundo: o que entra, o que sai e o que volta ============
+const COR_FONTE = {
+  "Retorno das obras (investimentos)": S.sinal,
+  "Retorno de empréstimos (financiamento)": "#E8A39C",
+  "Restituição de recursos": "#F4D2CE",
+  "Condecine": S.tinta,
+  "Fistel": "#5B6068",
+  "Remuneração de depósitos": "#9AA0A8",
+  "Não aplicação da Lei do Audiovisual": "#C8CCD1",
+  "Outras": "#E3E5E8",
+};
+
+function Fundo() {
+  const { env, erro, carregando } = useEnvelope(() => SondaAPI.fundo());
+  const d = env?.dados;
+  const linhas = d?.linhas || [];
+  const fontes = d?.fontes || [];
+  const r = d?.resumo;
+  const max = Math.max(1, ...linhas.map((l) => Math.max(l.receita_total_mi, l.contratado_mi || 0)));
+  const csv = () => baixarCSV("sonda_fsa_receitas.csv", ["ano", "fonte", "valor_R$_mi_correntes"],
+    linhas.flatMap((l) => [...Object.entries(l.por_fonte_mi).map(([f, v]) => [l.ano, f, v]), [l.ano, "Contratado no ano (saída)", l.contratado_mi]]));
+  const prov = env?.proveniencia;
+  const citacao = `SONDA — Observatório de Dados e Políticas do Audiovisual (UFF). Receitas do Fundo Setorial do Audiovisual por fonte, ${r?.periodo}. Fonte: ${prov?.fonte || "fsa.db"} (Relatórios de Gestão do FSA). Consultado em ${hoje()}.`;
+  const numero = (valor, legenda, cor) => (
+    <div style={{ flex: "1 1 220px", borderTop: `4px solid ${cor || S.tinta}`, paddingTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+      <span style={{ fontFamily: FONTE_NUM, fontSize: 30, fontWeight: 600, lineHeight: 1.05 }}>{valor}</span>
+      <span style={{ fontSize: 14.5, lineHeight: 1.4 }}>{legenda}</span>
+    </div>
+  );
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 24, fontFamily: FONTE_UI }}>
+      <TituloTela
+        titulo={r ? <>O retorno das obras foi <span style={{ color: S.sinalTxt }}>{fmtNum(r.parte_obras_na_receita, 1)}%</span> das receitas do FSA entre {r.periodo.replace("–", " e ")}</> : "O que entra no fundo, o que sai e o que volta"}
+        sub="Receitas do Fundo Setorial do Audiovisual por fonte, ao lado do valor contratado em cada ano. R$ correntes.">
+        {d && <button type="button" style={BTN_LEVE} onClick={csv}>Baixar CSV</button>}
+        {d && <CopiarCitacao texto={citacao} />}
+      </TituloTela>
+      <Estado carregando={carregando && !env} erro={erro} vazio={!linhas.length} vazioMsg="Nenhuma receita disponível no momento.">
+        {r && (
+          <section aria-label="Resumo do período" style={{ display: "flex", flexWrap: "wrap", gap: "16px 32px" }}>
+            {numero(`R$ ${fmtNum(r.retorno_obras_mi, 1)} mi`, `voltaram das obras (retorno de investimentos), ${r.periodo}`, S.sinal)}
+            {numero(`R$ ${fmtNum(r.retorno_emprestimos_mi, 1)} mi`, "voltaram de empréstimos (outro mecanismo)", "#E8A39C")}
+            {numero(`R$ ${fmtNum(r.contratado_mi, 0)} mi`, "contratados pelo FSA no mesmo período")}
+            {numero(`R$ ${fmtNum(r.receita_total_mi, 0)} mi`, "de receita total do fundo no período")}
+          </section>
+        )}
+        <section aria-labelledby="fundo-graf" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <h2 id="fundo-graf" style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Receitas por fonte e valor contratado, por ano (R$ mi)</h2>
+          <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexWrap: "wrap", gap: "6px 18px", fontSize: 14 }}>
+            {fontes.map((f) => <li key={f} style={{ display: "flex", alignItems: "center", gap: 6 }}><span aria-hidden="true" style={{ width: 12, height: 12, background: COR_FONTE[f] || S.linha, display: "inline-block", border: `1px solid ${S.linha}` }} />{f}</li>)}
+            <li style={{ display: "flex", alignItems: "center", gap: 6 }}><span aria-hidden="true" style={{ width: 12, height: 12, border: `2px solid ${S.tinta}`, display: "inline-block" }} />Contratado no ano</li>
+          </ul>
+          <div role="img" aria-label={`Receitas do FSA por fonte e valor contratado, ${r?.periodo}.`} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {linhas.map((l) => (
+              <div key={l.ano} style={{ display: "grid", gridTemplateColumns: "48px 1fr", gap: 10, alignItems: "center" }}>
+                <span style={{ fontFamily: FONTE_NUM, fontSize: 14, fontWeight: 600 }}>{l.ano}</span>
+                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  <div style={{ display: "flex", height: 22, width: `${(l.receita_total_mi / max) * 100}%` }}>
+                    {fontes.filter((f) => l.por_fonte_mi[f]).map((f) => (
+                      <span key={f} title={`${f}: R$ ${fmtNum(l.por_fonte_mi[f], 1)} mi`} style={{ flex: `${l.por_fonte_mi[f]} 0 0`, minWidth: f.startsWith("Retorno das obras") ? 3 : 0, background: COR_FONTE[f] || S.linha }} />
+                    ))}
+                  </div>
+                  {l.contratado_mi != null && <div style={{ height: 10, width: `${(l.contratado_mi / max) * 100}%`, border: `2px solid ${S.tinta}`, boxSizing: "border-box" }} />}
+                  <span style={{ fontSize: 13, color: S.mudo, fontFamily: FONTE_NUM }}>receita {fmtNum(l.receita_total_mi, 0)} · retorno das obras {fmtNum(l.retorno_obras_mi, 1)} · contratado {fmtNum(l.contratado_mi, 0)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+        <details>
+          <summary style={{ cursor: "pointer", minHeight: 44, display: "inline-flex", alignItems: "center", color: S.sonar, fontWeight: 600, fontSize: 14.5 }}>Ver a tabela por fonte</summary>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ borderCollapse: "collapse", minWidth: 720, fontSize: 14 }}>
+              <caption style={{ textAlign: "left", fontSize: 13.5, color: S.mudo, padding: "6px 0" }}>R$ mi correntes.</caption>
+              <thead><tr style={{ borderBottom: `2px solid ${S.tinta}` }}><th scope="col" style={{ textAlign: "left", padding: "8px 12px 8px 0" }}>Fonte</th>{linhas.map((l) => <th key={l.ano} scope="col" style={{ textAlign: "right", padding: "8px 0 8px 12px" }}>{l.ano}</th>)}</tr></thead>
+              <tbody style={{ fontFamily: FONTE_NUM }}>
+                {fontes.map((f) => (
+                  <tr key={f} style={{ borderBottom: `1px solid ${S.linha}` }}>
+                    <th scope="row" style={{ textAlign: "left", fontFamily: FONTE_UI, fontWeight: 500, padding: "8px 12px 8px 0" }}>{f}</th>
+                    {linhas.map((l) => <td key={l.ano} style={{ textAlign: "right", padding: "8px 0 8px 12px" }}>{l.por_fonte_mi[f] == null ? "—" : fmtNum(l.por_fonte_mi[f], 1)}</td>)}
+                  </tr>
+                ))}
+                <tr style={{ borderTop: `2px solid ${S.tinta}` }}>
+                  <th scope="row" style={{ textAlign: "left", fontFamily: FONTE_UI, padding: "8px 12px 8px 0" }}>Contratado no ano (saída)</th>
+                  {linhas.map((l) => <td key={l.ano} style={{ textAlign: "right", padding: "8px 0 8px 12px" }}>{fmtNum(l.contratado_mi, 1)}</td>)}
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+        <Notas itens={d?.ressalvas} />
       </Estado>
     </div>
   );
@@ -1604,6 +1716,7 @@ const AREAS = [
   { id: "indicadores", rotulo: "Consultar indicadores", telas: [
     { id: "investimento", rotulo: "Quanto se investe e se vê", comp: Investimento },
     { id: "obras", rotulo: "Filme a filme", comp: PorFilme },
+    { id: "fundo", rotulo: "O fundo", comp: Fundo },
     { id: "territorio", rotulo: "Onde", comp: Territorio },
     { id: "telas", rotulo: "O que chega às telas", comp: Ligacoes },
   ] },

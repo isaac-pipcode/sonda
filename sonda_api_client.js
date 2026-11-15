@@ -35,6 +35,8 @@ export const SondaAPI = {
   funil: () => get("/api/ligacoes/funil"),
   // uma linha por obra: bilheteria, FSA e valor captado (incentivo fiscal)
   obras: () => get("/api/obras"),
+  // receitas do FSA por fonte e ano, ao lado do contratado
+  fundo: () => get("/api/fundo"),
   // séries anuais (FSA + RIDAB), cada uma na sua unidade; moeda: "real" | "nominal"
   series: ({ de = 2009, ate = 2026, moeda = "real" } = {}) =>
     get(`/api/series?de=${de}&ate=${ate}&moeda=${moeda}`),

@@ -21,6 +21,8 @@ from . import fsa, ridab
 
 _cache_captado: dict[str, dict[str, float]] = {}
 _COMERCIALIZACAO = "%COMERCIALIZA%"
+# público dos relatórios diários acima do dobro do registrado (e acima disto) = a verificar.
+LIMIAR_VERIFICAR = 10_000
 
 
 def _so_digitos(v: object) -> str:
@@ -46,9 +48,11 @@ def captado_por_salic(base: Optional[str] = None) -> dict[str, float]:
     return res
 
 
-def calcular(fsa_con: Optional[sqlite3.Connection] = None, captado: Optional[dict[str, float]] = None) -> dict:
-    """Uma linha por obra. `captado` é o mapa SALIC → valor (None = RIDAB indisponível:
-    a coluna sai nula e a ressalva o declara). `fsa_con` é injetável para testes."""
+def calcular(fsa_con: Optional[sqlite3.Connection] = None, captado: Optional[dict[str, float]] = None,
+             circulacao: Optional[dict[str, dict]] = None) -> dict:
+    """Uma linha por obra. `captado` é o mapa SALIC → valor e `circulacao` o mapa CPB →
+    circulação em salas (None = RIDAB indisponível: as colunas saem nulas e a ressalva
+    o declara). `fsa_con` é injetável para testes."""
     fechar = fsa_con is None
     if fechar:
         fsa_con = fsa._conn_sqlite()
@@ -81,7 +85,9 @@ def calcular(fsa_con: Optional[sqlite3.Connection] = None, captado: Optional[dic
             "cpb": cpb, "titulo": None, "ano_lancamento": None, "tipo": None, "publico": None, "renda": None,
             "distribuidora": None, "uf": None, "produtora": None, "contratos_fsa": 0, "ano_primeiro_contrato": None,
             "fsa_contratado": None, "fsa_liberado": None, "fsa_comercializacao": None,
-            "projetos_incentivo": 0, "captado": None, "captado_compartilhado": False})
+            "projetos_incentivo": 0, "captado": None, "captado_compartilhado": False,
+            "municipios": None, "ufs": None, "complexos_pico": None, "anos_em_cartaz": None,
+            "publico_fora_capitais_pct": None, "publico_diario": None, "publico_verificar": False})
 
     for cpb, titulo, ano, tipo, publico, renda, distribuidora in bilheteria:
         obra(cpb).update(titulo=titulo, ano_lancamento=ano, tipo=tipo, publico=publico, renda=renda,
@@ -104,6 +110,19 @@ def calcular(fsa_con: Optional[sqlite3.Connection] = None, captado: Optional[dic
                 n_captado += 1
         o["captado_compartilhado"] = any(len(obras_por_salic[s]) > 1 for s in lista)
 
+    n_circ = n_verificar = 0
+    for cpb, c in (circulacao or {}).items():
+        o = obras.get(cpb)
+        if o is None or o["publico"] is None:
+            continue
+        o.update(c)
+        n_circ += 1
+        # decisão 2: as duas medidas ficam lado a lado; a divergência é sinalizada, não corrigida.
+        diario = c.get("publico_diario") or 0
+        if diario > 2 * o["publico"] and diario >= LIMIAR_VERIFICAR:
+            o["publico_verificar"] = True
+            n_verificar += 1
+
     linhas = sorted(obras.values(), key=lambda o: (-(o["publico"] or -1), o["titulo"] or ""))
     ressalvas = [
         "Valores em R$ correntes, sem deflacionar: compare obras de anos distantes com cuidado.",
@@ -115,10 +134,16 @@ def calcular(fsa_con: Optional[sqlite3.Connection] = None, captado: Optional[dic
         "Quando um projeto cobre mais de uma obra, o valor aparece em todas e a obra é sinalizada.",
         "UF e produtora são as da proponente do contrato do FSA (sede da empresa), não o local da produção; "
         "obras sem FSA não têm UF e saem do filtro por UF.",
+        "Circulação (municípios, UFs, complexos, público fora das capitais) vem dos relatórios diários de "
+        "bilheteria do RIDAB, completos só para lançamentos a partir de 2017; obras anteriores ficam sem circulação. "
+        "Complexos é a soma dos complexos de cada exibidora no ano de maior público; não há número de salas nem semanas.",
+        "Público a verificar: obras cujo público pelos relatórios diários do RIDAB passa do dobro do registrado "
+        "na fsa.db (e de 10 mil). Concentram-se em lançamentos recentes, cujo público na fsa.db parece ter sido "
+        "registrado logo no lançamento. As duas medidas ficam lado a lado; nenhuma é corrigida.",
         "Vazio significa sem registro na base, não zero.",
     ]
-    if captado is None:
-        ressalvas.insert(0, "O RIDAB não respondeu: a coluna de valor captado está vazia nesta consulta.")
+    if captado is None or circulacao is None:
+        ressalvas.insert(0, "O RIDAB não respondeu: valor captado e circulação estão vazios nesta consulta.")
     return {
         "obras": linhas,
         "totais": {
@@ -127,6 +152,8 @@ def calcular(fsa_con: Optional[sqlite3.Connection] = None, captado: Optional[dic
             "com_fsa": sum(1 for o in linhas if o["contratos_fsa"]),
             "com_comercializacao": sum(1 for o in linhas if o["fsa_comercializacao"]),
             "com_captado": n_captado,
+            "com_circulacao": n_circ,
+            "publico_a_verificar": n_verificar,
         },
         "ressalvas": ressalvas,
     }

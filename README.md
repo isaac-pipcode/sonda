@@ -124,6 +124,20 @@ não corrigida. `GET /api/ligacoes/funil` mostra o que liga e o que sobra do con
 à obra (CPB) e à bilheteria, com segmentos exclusivos (seguro · ambíguo · sem obra),
 órfãos por ano e por chamada, os maiores contratos sem obra e o elo ausente.
 
+## Obras e o fundo
+
+`GET /api/obras` — uma linha por obra (CPB): público e renda (fsa.db), FSA
+contratado, liberado e em comercialização (vínculo seguro), valor captado por
+incentivo fiscal (RIDAB, pelo nº SALIC) e circulação em salas (RIDAB, relatórios
+diários: municípios, UFs, complexos no ano de pico, público fora das capitais).
+Nada é somado entre bases; ausência é nula. Quando o público dos relatórios
+diários passa do dobro do registrado na fsa.db, a obra sai com
+`publico_verificar` — as duas medidas ficam lado a lado, nenhuma é corrigida.
+
+`GET /api/fundo` — receitas do FSA por ano e fonte (Relatórios de Gestão, via
+fsa.db), ao lado do contratado. Separa retorno das obras (investimentos) de
+retorno de empréstimos (financiamento).
+
 ## Como rodar
 
 ```bash

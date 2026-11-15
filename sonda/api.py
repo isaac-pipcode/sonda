@@ -18,7 +18,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, Field
 
-from . import engine, fsa, funil as funil_mod, obras as obras_mod, percurso as percurso_mod, ridab, series as series_mod, territorio as territorio_mod
+from . import circulacao as circ_mod, engine, fsa, fundo as fundo_mod, funil as funil_mod, obras as obras_mod, percurso as percurso_mod, ridab, series as series_mod, territorio as territorio_mod
 from .config import CONFIG
 from .db import connect, init_schema
 from .provenance import agora_utc, envelope, fixity
@@ -386,17 +386,31 @@ def ligacoes_funil():
     return envelope(res, proveniencia=fsa.proveniencia_base(), avisos=res["ressalvas"])
 
 
+@app.get("/api/fundo")
+def fundo():
+    """Receitas do FSA por ano e fonte, ao lado do contratado: o que entra, sai e volta."""
+    _exige_fsa()
+    res = fundo_mod.calcular()
+    return envelope(res, proveniencia=fsa.proveniencia_base(), avisos=res["ressalvas"])
+
+
 @app.get("/api/obras")
 def obras():
     """Uma linha por obra (CPB): bilheteria, FSA (contratado, liberado, comercialização)
     e valor captado por incentivo fiscal. Sem RIDAB, o captado sai nulo e a ressalva o diz."""
     _exige_fsa()
+    tabelas: list[str] = []
     try:
         captado = obras_mod.captado_por_salic()
-        tabelas = ["renuncia_fiscal"]
+        tabelas.append("renuncia_fiscal")
     except duckdb.IOException:
-        captado, tabelas = None, []
-    res = obras_mod.calcular(captado=captado)
+        captado = None
+    try:
+        circulacao = circ_mod.por_obra()
+        tabelas.extend(circ_mod.TABELAS)
+    except duckdb.IOException:
+        circulacao = None
+    res = obras_mod.calcular(captado=captado, circulacao=circulacao)
     prov = [fsa.proveniencia_base()] + ([ridab.proveniencia_base(tabelas)] if tabelas else [])
     return envelope(res, proveniencia=prov, avisos=res["ressalvas"])
 
